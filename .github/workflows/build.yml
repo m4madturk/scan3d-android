@@ -3,6 +3,8 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -17,3 +19,13 @@ jobs:
         with:
           name: scan3d-apk
           path: app/build/outputs/apk/release/*.apk
+      - name: Commit the APK to the apk branch (private repo; readable without external hosts)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          mkdir -p /tmp/apkbranch && cp "$APK" /tmp/apkbranch/Scan3D.apk
+          cd /tmp/apkbranch
+          git init -q && git checkout -q -b apk
+          git config user.name "ci" && git config user.email "ci@users.noreply.github.com"
+          git add Scan3D.apk && git commit -qm "APK from ${{ github.sha }} (run ${{ github.run_number }})"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" apk
