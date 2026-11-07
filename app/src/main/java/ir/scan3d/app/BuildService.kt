@@ -27,6 +27,8 @@ class BuildService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onCreate() { super.onCreate(); org.opencv.android.OpenCVLoader.initLocal() }   // board template needs OpenCV
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val sid = intent?.getStringExtra("sid") ?: return START_NOT_STICKY
         val calib = intent.getBooleanExtra("calib", false)
