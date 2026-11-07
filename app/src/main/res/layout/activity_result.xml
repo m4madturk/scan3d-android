@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#0F1513">
+<LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp" android:layoutDirection="rtl">
+    <TextView android:id="@+id/title" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#E5ECE8" android:textSize="20sp" android:textStyle="bold" />
+    <TextView android:id="@+id/state" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#3BC2B9" android:textSize="15sp" android:paddingTop="8dp" />
+    <ImageView android:id="@+id/preview" android:layout_width="match_parent" android:layout_height="wrap_content" android:adjustViewBounds="true" android:paddingTop="8dp" android:contentDescription="@string/result" />
+    <TextView android:id="@+id/info" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#93A29B" android:fontFamily="monospace" android:textDirection="ltr" android:textSize="12sp" android:paddingTop="8dp" />
+    <Button android:id="@+id/btnShare" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/share_stl" android:enabled="false" />
+</LinearLayout>
+</ScrollView>

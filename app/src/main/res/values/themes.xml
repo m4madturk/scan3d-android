@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.Scan3D" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">#3BC2B9</item>
+        <item name="colorOnPrimary">#06201E</item>
+        <item name="android:windowBackground">#0F1513</item>
+    </style>
+</resources>
