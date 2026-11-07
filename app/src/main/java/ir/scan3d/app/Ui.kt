@@ -35,6 +35,18 @@ object Ui {
         v.requestApplyInsets()
     }
 
+    /** Keeps a bottom-anchored view entirely above the navigation bar (margin, so nothing scrolls under it). */
+    fun marginAboveNavBar(v: View, onInsets: ((top: Int) -> Unit)? = null) {
+        val lp = v.layoutParams as ViewGroup.MarginLayoutParams; val base = lp.bottomMargin
+        ViewCompat.setOnApplyWindowInsetsListener(v) { view, ins ->
+            val sb = ins.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            (view.layoutParams as ViewGroup.MarginLayoutParams).bottomMargin = base + sb.bottom; view.requestLayout()
+            onInsets?.invoke(sb.top)
+            ins
+        }
+        v.requestApplyInsets()
+    }
+
     /** Persian digits for user-facing numbers. */
     fun fa(n: Number): String = n.toString().map { ch -> if (ch.isDigit()) ('۰' + (ch - '0')) else ch }.joinToString("")
 }

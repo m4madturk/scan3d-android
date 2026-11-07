@@ -29,8 +29,9 @@ object Preview {
 
     private fun drawView(c: Canvas, m: Mesh, x0: Int, y0: Int, w: Int, h: Int, elevDeg: Double, azimDeg: Double) {
         val b = m.bounds(); val cx = (b[0][0] + b[1][0]) / 2; val cy = (b[0][1] + b[1][1]) / 2; val cz = (b[0][2] + b[1][2]) / 2
-        val span = maxOf(b[1][0] - b[0][0], b[1][1] - b[0][1], b[1][2] - b[0][2])
-        val s = 0.78 * minOf(w, h) / span
+        val dx = b[1][0] - b[0][0]; val dy = b[1][1] - b[0][1]; val dz = b[1][2] - b[0][2]
+        val span = sqrt(dx * dx + dy * dy + dz * dz)          // bounding-sphere diameter: fits from every angle
+        val s = 0.88 * minOf(w, h) / span
         val e = Math.toRadians(elevDeg); val a = Math.toRadians(azimDeg)
         // view axes
         val rx = doubleArrayOf(cos(a), sin(a), 0.0)

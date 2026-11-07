@@ -19,6 +19,7 @@ class OverlayView(ctx: Context, attrs: AttributeSet?) : View(ctx, attrs) {
     var calibCells: IntArray? = null     // calibration mode: 4x6 grid counts
     var stickerBoxes: List<FloatArray> = emptyList()   // preview-space quads of detected stickers
     var boardOk = false
+    var topInset = 0f                    // status-bar height: the ring is drawn below it
 
     private val pFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val pStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 3f }
@@ -37,7 +38,9 @@ class OverlayView(ctx: Context, attrs: AttributeSet?) : View(ctx, attrs) {
         calibCells?.let { drawGrid(c, it); return }
         val L = layout ?: return
         val r = minOf(width, height) * 0.19f
-        val cx = width - r - 24f; val cy = r + 24f
+        val d = resources.displayMetrics.density
+        val cx = width - r - 14f * d; val cy = topInset + r + 14f * d
+        pText.textSize = 12f * d
         val radii = if (L.bands.size == 3) listOf(0.76f to 1.0f, 0.5f to 0.74f, 0.24f to 0.48f) else listOf(0.6f to 1.0f, 0.2f to 0.58f)
         val w = 360f / L.az
         for (b in L.bands.indices) for (a in 0 until L.az) {

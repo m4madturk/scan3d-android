@@ -27,6 +27,7 @@ class ResultActivity : AppCompatActivity() {
         val sid = intent.getStringExtra("sid") ?: run { finish(); return }
         val calib = intent.getBooleanExtra("calib", false)
         b.title.text = if (calib) getString(R.string.calib_result) else getString(R.string.result)
+        b.btnShare.visibility = if (calib) android.view.View.GONE else android.view.View.VISIBLE
         b.btnBack.setOnClickListener { finish() }
         val dir = Store(this).sessionDir(sid)
         val resultFile = File(dir, "result.json")
@@ -62,7 +63,8 @@ class ResultActivity : AppCompatActivity() {
         d.optJSONArray("warnings")?.let { w -> for (i in 0 until w.length()) sb.append("! ").append(w.getString(i)).append("\n") }
         b.info.text = sb.toString()
         val prev = File(dir, "preview.png")
-        if (st == "done" && prev.exists()) b.preview.setImageBitmap(BitmapFactory.decodeFile(prev.absolutePath))
+        if (st == "done" && prev.exists()) { b.preview.setImageBitmap(BitmapFactory.decodeFile(prev.absolutePath)); b.preview.visibility = android.view.View.VISIBLE }
+        else b.preview.visibility = android.view.View.GONE
         val stl = File(dir, "model.stl")
         b.btnShare.isEnabled = st == "done" && stl.exists()
         b.btnShare.setOnClickListener {

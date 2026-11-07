@@ -43,7 +43,7 @@
     <string name="calib_added">ثبت شد: %1$s گوشه، شیب حدود %2$s درجه</string>
     <string name="calib_more">هنوز کمه؛ حداقل ۱۵ عکس طبق راهنما لازمه.</string>
     <string name="profile_fmt">پروفایل لنز این گوشی: %1$s</string>
-    <string name="no_profile">پروفایل لنز نداری. یک‌بار «کالیبراسیون» کن تا دقت بالاتر بره (بدون آن هم کار می‌کنه).</string>
+    <string name="no_profile">پروفایل لنز نداری؛ یک‌بار «کالیبراسیون» کن (اختیاری، دقت بالاتر).</string>
     <string name="waiting">در انتظار شروع پردازش…</string>
     <string name="processing">در حال پردازش روی گوشی…</string>
     <string name="processing_calib">محاسبه‌ی کالیبراسیون لنز…</string>

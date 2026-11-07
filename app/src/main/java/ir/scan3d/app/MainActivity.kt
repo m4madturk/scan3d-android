@@ -64,7 +64,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         super.onCreate(savedInstanceState)
         Ui.edgeToEdge(this)
         b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
-        Ui.marginBelowStatusBar(b.live); Ui.padSystemBars(b.panelInner, top = false)
+        Ui.marginBelowStatusBar(b.live)
+        Ui.marginAboveNavBar(b.panel) { top -> b.overlay.topInset = top.toFloat(); b.overlay.invalidate() }
         cam = CameraController(this); store = Store(this)
         if (!OpenCVLoader.initLocal()) { toast("OpenCV failed to load"); finish(); return }
 
