@@ -12,6 +12,7 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1"
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }   // real phones only; drops ~95 MB of x86 libs
     }
     buildTypes {
         release {
