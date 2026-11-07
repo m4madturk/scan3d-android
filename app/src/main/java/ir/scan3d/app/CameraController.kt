@@ -109,7 +109,7 @@ class CameraController(private val ctx: Context) {
             sensorSize = jpeg ?: px
             if (fl != null && fl.isNotEmpty() && ps != null && px != null && sensorSize != null) {
                 // focal length in pixels of the full-resolution JPEG (sensor crop may differ slightly; a guess is enough)
-                focalPx = fl[0] / ps.width * sensorSize!!.width
+                focalPx = (fl[0] / ps.width * sensorSize!!.width).toDouble()
             }
             Log.i("Scan3D", "sensor $sensorSize focal ${fl?.toList()} -> fpx $focalPx")
         } catch (e: Exception) { Log.w("Scan3D", "characteristics: $e") }
