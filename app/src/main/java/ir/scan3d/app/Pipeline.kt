@@ -1,0 +1,125 @@
+package ir.scan3d.app
+
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import ir.scan3d.app.engine.Camera
+import ir.scan3d.app.engine.CameraPrior
+import ir.scan3d.app.engine.Carve
+import ir.scan3d.app.engine.FrameObs
+import ir.scan3d.app.engine.MarchingCubes
+import ir.scan3d.app.engine.Mesh
+import ir.scan3d.app.engine.PlaneCut
+import ir.scan3d.app.engine.Pose6
+import ir.scan3d.app.engine.SilView
+import ir.scan3d.app.engine.Silhouette
+import ir.scan3d.app.engine.SolveResult
+import ir.scan3d.app.engine.Solver
+import ir.scan3d.app.engine.Vec3
+import org.json.JSONObject
+import org.opencv.core.Mat
+import org.opencv.core.Size
+import org.opencv.objdetect.CharucoBoard
+import org.opencv.objdetect.Objdetect
+import java.io.File
+import kotlin.math.max
+import kotlin.math.min
+
+/** Everything from captured shots to an STL, entirely on the phone. */
+object Pipeline {
+    class Report(val sizeMm: DoubleArray, val volumeCm3: Double, val views: Int, val planes: Int, val sigma0: Double,
+                 val stickers: Int, val frameworkFrames: Int, val warnings: List<String>, val seconds: Double, val triangles: Int)
+
+    private const val SIL_MAX = 1000     // silhouettes are computed on a downscaled copy (speed; accuracy limited by the hull anyway)
+    private const val TPL_PX_PER_MM = 4.0
+
+    /** The printed board as a byte image (0 = black), from the same OpenCV board definition. */
+    val boardTemplate: Silhouette.BoardTemplate by lazy {
+        val d = Objdetect.getPredefinedDictionary(Objdetect.DICT_5X5_100)
+        val b = CharucoBoard(Size(7.0, 10.0), Detector.SQUARE_M.toFloat(), Detector.MARKER_M.toFloat(), d)
+        val w = (175 * TPL_PX_PER_MM).toInt(); val h = (250 * TPL_PX_PER_MM).toInt()
+        val m = Mat(); b.generateImage(Size(w.toDouble(), h.toDouble()), m, 0, 1)
+        val buf = ByteArray(w * h); m.get(0, 0, buf); m.release()
+        Silhouette.BoardTemplate(buf, w, h, TPL_PX_PER_MM)
+    }
+
+    fun frameObs(shots: List<Shot>): List<FrameObs> = shots.mapIndexed { i, s ->
+        val st = HashMap<Int, DoubleArray>()
+        s.stickers.forEach { st[it.id] = DoubleArray(8) { k -> it.corners[k].toDouble() } }
+        val b = s.board
+        FrameObs(i, b?.ids ?: IntArray(0), b?.pts?.let { p -> DoubleArray(p.size) { p[it].toDouble() } } ?: DoubleArray(0), st, true)
+    }
+
+    fun solve(shots: List<Shot>, w: Int, h: Int, prior: CameraPrior?, log: (String) -> Unit): SolveResult {
+        val solver = Solver(Detector.SQUARE_M * 1000, Detector.SQUARES_X, Detector.TARGET_MM); solver.log = log
+        return solver.solve(frameObs(shots), w, h, prior)
+    }
+
+    /**
+     * Build the model. shots must all share one sensor size. Returns (mesh in mm, centred on xy and
+     * resting on z = 0, report).
+     */
+    fun build(shots: List<Shot>, files: List<File>, convex: Boolean, prior: CameraPrior?, voxel: Double,
+              progress: (String, Double) -> Unit, log: (String) -> Unit): Pair<Mesh, Report> {
+        val t0 = System.currentTimeMillis()
+        val done = shots.indices.filter { shots[it].state == "done" && shots[it].board != null }
+        require(done.size >= 2) { "fewer than 2 shots with the board" }
+        val w = shots[done[0]].w; val h = shots[done[0]].h
+        val use = done.filter { shots[it].w == w && shots[it].h == h }
+        progress("حل مارکرها و دوربین…", 0.05)
+        val geo = solve(use.map { shots[it] }, w, h, prior, log)
+
+        // silhouettes
+        val views = ArrayList<SilView>()
+        val sc = min(1.0, SIL_MAX / max(w, h).toDouble())
+        val sw = (w * sc).toInt(); val sh = (h * sc).toInt()
+        val camS = Camera(geo.camera.f * sc, geo.camera.cx * sc, geo.camera.cy * sc, geo.camera.k1, geo.camera.k2)
+        for ((k, ui) in use.withIndex()) {
+            val pose = geo.poses[k] ?: continue
+            progress("دورخط عکس ${k + 1} از ${use.size}…", 0.1 + 0.4 * k / use.size)
+            val gray = loadGray(files[ui], sw, sh) ?: continue
+            val r = Silhouette.extract(gray, sw, sh, camS, pose, boardTemplate) ?: run { log("shot ${shots[ui].n}: no silhouette"); null } ?: continue
+            log("shot ${shots[ui].n}: silhouette solidity %.2f".format(r.solidity))
+            views.add(SilView(sw, sh, r.mask, camS, pose))
+        }
+        require(views.size >= 2) { "fewer than 2 usable silhouettes" }
+
+        // marker planes (z-up frame)
+        val planes = geo.stickers.filter { it.views >= min(3, views.size) }.map {
+            PlaneCut(Vec3(it.centre.x, it.centre.y, -it.centre.z), Vec3(it.normalOut.x, it.normalOut.y, -it.normalOut.z), if (convex) null else 20.0)
+        }
+        progress("تراش اولیه…", 0.55)
+        val coarse = Carve.carve(views, arrayOf(doubleArrayOf(-15.0, 190.0), doubleArrayOf(-15.0, 265.0), doubleArrayOf(0.0, 120.0)), 2.0, 0.5, planes, 1)
+        val b = Carve.insideBounds(coarse, 4.0) ?: throw IllegalStateException("object not found inside the silhouettes")
+        val span = DoubleArray(3) { b[it][1] - b[it][0] }
+        val vox = max(voxel, Math.cbrt(span[0] * span[1] * span[2] / 1.0e7))    // cap at ~10 M voxels (grid + marching cubes ~ 100 MB)
+        progress("تراش نهایی (${"%.2f".format(vox)} mm)…", 0.6)
+        val g = Carve.carve(views, b, vox, 0.5, planes, 1) { p -> progress("تراش نهایی…", 0.6 + 0.3 * p) }
+        progress("ساخت مش…", 0.92)
+        val mesh = MarchingCubes.run(g)
+        val bb = mesh.bounds()
+        val centred = mesh.translated((-(bb[0][0] + bb[1][0]) / 2).toFloat(), (-(bb[0][1] + bb[1][1]) / 2).toFloat(), (-bb[0][2]).toFloat())
+        val size = DoubleArray(3) { bb[1][it] - bb[0][it] }
+        val rep = Report(size, mesh.volume() / 1000, views.size, planes.size, geo.sigma0, geo.stickers.size, geo.frameworkFrames, geo.warnings,
+            (System.currentTimeMillis() - t0) / 1000.0, mesh.triangleCount)
+        progress("تمام", 1.0)
+        return centred to rep
+    }
+
+    /** Gray bytes of a JPEG, in SENSOR frame (EXIF ignored on purpose), downscaled to (w, h). */
+    fun loadGray(f: File, w: Int, h: Int): ByteArray? {
+        val o = BitmapFactory.Options(); o.inJustDecodeBounds = true; BitmapFactory.decodeFile(f.absolutePath, o)
+        var sample = 1; while (o.outWidth / (sample * 2) >= w && o.outHeight / (sample * 2) >= h) sample *= 2
+        val o2 = BitmapFactory.Options(); o2.inSampleSize = sample; o2.inPreferredConfig = Bitmap.Config.ARGB_8888
+        val bm = BitmapFactory.decodeFile(f.absolutePath, o2) ?: return null
+        val scaled = if (bm.width != w || bm.height != h) Bitmap.createScaledBitmap(bm, w, h, true) else bm
+        val px = IntArray(w * h); scaled.getPixels(px, 0, w, 0, 0, w, h)
+        val out = ByteArray(w * h) { val c = px[it]; ((((c shr 16) and 255) * 77 + ((c shr 8) and 255) * 150 + (c and 255) * 29) shr 8).toByte() }
+        if (scaled !== bm) scaled.recycle(); bm.recycle()
+        return out
+    }
+
+    fun reportJson(r: Report): JSONObject = JSONObject()
+        .put("size_mm", org.json.JSONArray(r.sizeMm.toList())).put("volume_cm3", r.volumeCm3).put("views_used", r.views)
+        .put("marker_planes", r.planes).put("sigma0_px", r.sigma0).put("stickers", r.stickers).put("framework_frames", r.frameworkFrames)
+        .put("warnings", org.json.JSONArray(r.warnings)).put("seconds", r.seconds).put("triangles", r.triangles)
+}

@@ -1,6 +1,7 @@
 package ir.scan3d.app
 
 import android.Manifest
+import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
@@ -8,6 +9,7 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.widget.Toast
@@ -23,20 +25,22 @@ import ir.scan3d.app.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 import org.opencv.android.OpenCVLoader
+import org.opencv.core.Core
 import org.opencv.core.CvType
 import org.opencv.core.Mat
 import org.opencv.imgcodecs.Imgcodecs
-import org.opencv.imgproc.Imgproc
 import java.io.File
-import kotlin.math.abs
 import kotlin.math.sqrt
 
+/**
+ * Capture screen. Everything else (solver, carving, STL) runs on the phone in BuildService;
+ * sessions and camera profiles are plain files under the app's private storage (Store).
+ */
 class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var b: ActivityMainBinding
-    private lateinit var api: Api
     private lateinit var cam: CameraController
+    private lateinit var store: Store
     private var session: Session? = null
     private var calib: CalibPlanner? = null
     private var mode = "scan"                 // scan | calib
@@ -44,57 +48,62 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private var autoShutter = false
     private var stillFrames = 0
     private var gyroRate = 0f
-    private var lastPreviewPose: Pose? = null
-    private var previewScaleX = 1f; private var previewScaleY = 1f
     private var autoLockDone = false
-    private val fa = { n: Int -> n.toString().map { ch -> if (ch.isDigit()) ('۰' + (ch - '0')) else ch }.joinToString("") }
+    private var torch = false
+    private val fa = { n: Int -> Ui.fa(n) }
 
     private val permission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         if (ok) startCamera() else { toast(getString(R.string.need_camera)); finish() }
     }
+    private val notifPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    private val pickSession = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        if (r.resultCode == Activity.RESULT_OK) r.data?.getStringExtra("sid")?.let { loadSession(it) }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Ui.edgeToEdge(this)
         b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
-        api = Api(this); cam = CameraController(this)
+        Ui.marginBelowStatusBar(b.live); Ui.padSystemBars(b.panelInner, top = false)
+        cam = CameraController(this); store = Store(this)
         if (!OpenCVLoader.initLocal()) { toast("OpenCV failed to load"); finish(); return }
-        if (!api.configured) startActivity(Intent(this, SettingsActivity::class.java))
 
         b.btnShot.setOnClickListener { capture() }
         b.btnAuto.setOnClickListener { autoShutter = !autoShutter; b.btnAuto.text = getString(if (autoShutter) R.string.auto_on else R.string.auto_off) }
         b.btnLock.setOnClickListener { if (cam.locked) { cam.unlock(); b.btnLock.text = getString(R.string.lock) } else { cam.lock(); b.btnLock.text = getString(R.string.unlock) } }
-        b.btnTorch.setOnClickListener { torch = !torch; cam.torch(torch) }
+        b.btnTorch.setOnClickListener { torch = !torch; cam.torch(torch); b.btnTorch.alpha = if (torch) 1f else 0.6f }
         b.btnMode.setOnClickListener { switchMode(if (mode == "scan") "calib" else "scan") }
-        b.btnSettings.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         b.btnNew.setOnClickListener { newSession() }
         b.btnBuild.setOnClickListener { requestBuild() }
-        b.btnResult.setOnClickListener { session?.let { startActivity(Intent(this, ResultActivity::class.java).putExtra("sid", it.sid)) } }
+        b.btnResult.setOnClickListener { session?.let { startActivity(Intent(this, ResultActivity::class.java).putExtra("sid", it.sid).putExtra("calib", mode == "calib")) } }
+        b.btnSessions.setOnClickListener { pickSession.launch(Intent(this, SessionsActivity::class.java)) }
         b.modeSel.setOnCheckedChangeListener { _, id ->
-            session?.mode = when (id) { R.id.mode8 -> "8"; R.id.modeFree -> "free"; else -> "18" }
-            session?.shots?.forEach { it.slotKey = session!!.slotOf(it.pose) }
-            pushSession(); refresh()
+            val s = session ?: return@setOnCheckedChangeListener
+            s.mode = when (id) { R.id.mode8 -> "8"; R.id.modeFree -> "free"; else -> "18" }
+            s.shots.forEach { it.slotKey = s.slotOf(it.pose) }
+            persist(); refresh()
         }
-        newSession()
+        b.btnTorch.alpha = 0.6f
+
+        val sid = intent.getStringExtra("sid")
+        if (intent.getStringExtra("mode") == "calib") mode = "calib"
+        if (sid != null && store.load(sid) != null) loadSession(sid) else newSession()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera()
         else permission.launch(Manifest.permission.CAMERA)
     }
 
-    private var torch = false
-
     override fun onResume() {
         super.onResume()
-        (getSystemService(SENSOR_SERVICE) as SensorManager).let { sm ->
-            sm.getDefaultSensor(Sensor.TYPE_GYROSCOPE)?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
-        }
+        (getSystemService(SENSOR_SERVICE) as SensorManager).let { sm -> sm.getDefaultSensor(Sensor.TYPE_GYROSCOPE)?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) } }
+        b.profile.text = store.profileSummary()?.let { getString(R.string.profile_fmt, it) } ?: getString(R.string.no_profile)
+        refresh()
     }
 
     override fun onPause() { super.onPause(); (getSystemService(SENSOR_SERVICE) as SensorManager).unregisterListener(this) }
     override fun onSensorChanged(e: SensorEvent) { gyroRate = sqrt(e.values[0] * e.values[0] + e.values[1] * e.values[1] + e.values[2] * e.values[2]) }
     override fun onAccuracyChanged(s: Sensor?, a: Int) {}
 
-    private fun startCamera() {
-        cam.start(this, b.preview, ::analyzePreview) { b.status.text = getString(R.string.ready) }
-    }
+    private fun startCamera() { cam.start(this, b.preview, ::analyzePreview) { b.status.text = getString(R.string.ready) } }
 
     // ---------------- live preview analysis ----------------
     private fun analyzePreview(img: ImageProxy) {
@@ -104,12 +113,11 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             val gray = Mat(h, w, CvType.CV_8UC1)
             if (stride == w) { val arr = ByteArray(w * h); buf.get(arr, 0, w * h); gray.put(0, 0, arr) }
             else { val row = ByteArray(w); for (y in 0 until h) { buf.position(y * stride); buf.get(row, 0, w); gray.put(y, 0, row) } }
-            val rot = img.imageInfo.rotationDegrees
             val up = Mat()
-            when (rot) { 90 -> org.opencv.core.Core.rotate(gray, up, org.opencv.core.Core.ROTATE_90_CLOCKWISE)
-                180 -> org.opencv.core.Core.rotate(gray, up, org.opencv.core.Core.ROTATE_180)
-                270 -> org.opencv.core.Core.rotate(gray, up, org.opencv.core.Core.ROTATE_90_COUNTERCLOCKWISE)
-                else -> gray.copyTo(up) }
+            when (img.imageInfo.rotationDegrees) {
+                90 -> Core.rotate(gray, up, Core.ROTATE_90_CLOCKWISE); 180 -> Core.rotate(gray, up, Core.ROTATE_180)
+                270 -> Core.rotate(gray, up, Core.ROTATE_90_COUNTERCLOCKWISE); else -> gray.copyTo(up)
+            }
             val (ids, nBoard) = Detector.quick(up)
             val boardOk = nBoard >= 6
             val still = gyroRate < 0.08f
@@ -117,16 +125,15 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             runOnUiThread {
                 b.overlay.boardOk = boardOk
                 b.live.text = getString(R.string.live_fmt, fa(ids.size), fa(nBoard), if (still) "●" else "○")
-                if (boardOk && !autoLockDone && mode == "scan" && cam.locked.not() && stillFrames > 15) {
+                if (boardOk && !autoLockDone && mode == "scan" && !cam.locked && stillFrames > 15) {
                     // first steady framing of the board: lock exposure/WB/focus so every shot shares one camera
                     cam.lock(); autoLockDone = true; b.btnLock.text = getString(R.string.unlock); toast(getString(R.string.locked_auto))
                 }
                 b.overlay.invalidate()
             }
-            if (autoShutter && !busy && boardOk && stillFrames > 12 && ids.isNotEmpty()) { stillFrames = 0; runOnUiThread { capture() } }
+            if (autoShutter && !busy && boardOk && stillFrames > 12 && (ids.isNotEmpty() || mode == "calib")) { stillFrames = 0; runOnUiThread { capture() } }
             gray.release(); up.release()
-        } catch (e: Exception) { /* preview analysis is best effort */ }
-        finally { img.close() }
+        } catch (e: Exception) { /* preview analysis is best effort */ } finally { img.close() }
     }
 
     // ---------------- capture ----------------
@@ -136,8 +143,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         busy = true
         val s = session ?: return
         val n = (s.shots.maxOfOrNull { it.n } ?: 0) + 1
-        val shot = Shot(n, "k" + System.currentTimeMillis().toString(36))
-        val file = File(s.dir, "shot$n.jpg")
+        val shot = Shot(n, "k$n")
+        val file = File(store.sessionDir(s.sid), "shot$n.jpg")
         b.status.text = getString(R.string.capturing)
         ic.takePicture(ImageCapture.OutputFileOptions.Builder(file).build(), ContextCompat.getMainExecutor(this),
             object : ImageCapture.OnImageSavedCallback {
@@ -149,30 +156,30 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private fun process(shot: Shot, file: File) {
         val s = session ?: return
         shot.exposureNs = cam.lastExposureNs; shot.iso = cam.lastIso; shot.focusDist = cam.lastFocus
-        if (mode == "scan") { s.shots.add(shot); refresh() }
+        s.shots.add(shot); refresh()
         lifecycleScope.launch(Dispatchers.Default) {
             try {
-                // CameraX writes the sensor-frame JPEG with an EXIF orientation tag: read it, keep sensor frame
+                // CameraX writes the sensor-frame JPEG with an EXIF orientation tag: read it, keep the sensor frame
                 val exif = ExifInterface(file.absolutePath)
                 shot.orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, 1)
                 val gray = Imgcodecs.imread(file.absolutePath, Imgcodecs.IMREAD_GRAYSCALE)
                 shot.w = gray.cols(); shot.h = gray.rows()
-                shot.landscape = when (shot.orientation) { 6, 8 -> false; else -> true }   // phone sideways -> no rotation tag
+                shot.landscape = shot.orientation !in intArrayOf(6, 8)   // phone sideways -> no 90 degree rotation tag
                 val a = Detector.analyze(gray, cam.focalPx?.let { it * gray.cols() / (cam.sensorSize?.width ?: gray.cols()) })
                 gray.release()
                 shot.stickers = a.stickers; shot.board = a.board; shot.sharp = a.sharpness; shot.millis = a.millis
                 shot.pose = a.pose; shot.slotKey = s.slotOf(a.pose)
-                // thumbnail
                 val opts = BitmapFactory.Options().apply { inSampleSize = 16 }
-                val bmp = BitmapFactory.decodeFile(file.absolutePath, opts)
-                shot.thumb = File(s.dir, "thumb${shot.n}.jpg").also { f -> f.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 60, it) } }
-                shot.state = "done"
-                withContext(Dispatchers.Main) { refresh() }
-                if (mode == "calib") {
-                    val v = calib?.add(a.board, shot.landscape, a.sharpness)
-                    withContext(Dispatchers.Main) { toast(if (v == null) getString(R.string.calib_no_board) else getString(R.string.calib_added, fa(a.board?.ids?.size ?: 0), v.tiltDeg.toInt().toString())); refresh() }
+                BitmapFactory.decodeFile(file.absolutePath, opts)?.let { bmp ->
+                    shot.thumb = File(store.sessionDir(s.sid), "thumb${shot.n}.jpg").also { f -> f.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 60, it) } }
                 }
-                upload(shot, file)
+                shot.state = "done"
+                if (mode == "calib") {
+                    val v = planner(shot.w, shot.h).add(a.board, shot.landscape, a.sharpness)
+                    withContext(Dispatchers.Main) { toast(if (v == null) getString(R.string.calib_no_board) else getString(R.string.calib_added, fa(a.board?.ids?.size ?: 0), fa(v.tiltDeg.toInt()))) }
+                }
+                persist()
+                withContext(Dispatchers.Main) { refresh(); b.status.text = getString(R.string.shot_done, fa(shot.n), fa(a.stickers.size), fa(a.board?.ids?.size ?: 0), a.millis.toString()) }
             } catch (e: Exception) {
                 shot.state = "error"
                 withContext(Dispatchers.Main) { toast("analyze: ${e.message}"); refresh() }
@@ -180,71 +187,57 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
     }
 
-    private suspend fun upload(shot: Shot, file: File) {
-        if (!api.configured) return
-        val s = session ?: return
-        try {
-            withContext(Dispatchers.Main) { b.status.text = getString(R.string.uploading, fa(shot.n)) }
-            shot.assetId = api.uploadJpeg(file.readBytes())
-            val col = if (mode == "calib") "calib" else "sessions"
-            api.putDoc("$col/${s.sid}/shots/${shot.id}", shot.toJson())
-            shot.sent = true
-            withContext(Dispatchers.Main) { refresh(); b.status.text = getString(R.string.sent, fa(shot.n)) }
-        } catch (e: Exception) {
-            withContext(Dispatchers.Main) { b.status.text = getString(R.string.upload_failed, e.message ?: "") }
-        }
+    // ---------------- session / modes ----------------
+    /** Calibration planner sized to the real sensor frame; rebuilt from the stored shots when the size changes. */
+    private fun planner(w: Int, h: Int): CalibPlanner {
+        val p = calib
+        if (p != null && p.width == w && p.height == h) return p
+        val np = CalibPlanner(w, h)
+        session?.shots?.filter { it.state == "done" && it.w == w && it.h == h }?.forEach { np.add(it.board, it.landscape, it.sharp) }
+        calib = np; return np
     }
 
-    // ---------------- session / modes ----------------
     private fun newSession() {
         val sid = (if (mode == "calib") "c" else "s") + System.currentTimeMillis().toString(36)
-        session = Session(this, sid, if (mode == "calib") "calibration ${android.os.Build.MODEL}" else "scan", if (mode == "calib") "free" else "18")
-        calib = if (mode == "calib") CalibPlanner(cam.sensorSize?.width ?: 4000, cam.sensorSize?.height ?: 3000) else null
+        session = Session(this, sid, if (mode == "calib") "calibration" else "scan", if (mode == "calib") "free" else "18", mode == "calib")
+        calib = null
         autoLockDone = false
-        b.sid.text = "session $sid"
-        pushSession(); refresh()
+        applyModeUi(); persist(); refresh()
     }
 
-    private fun switchMode(m: String) {
-        mode = m
-        b.btnMode.text = getString(if (m == "calib") R.string.to_scan else R.string.to_calib)
-        b.modeSel.visibility = if (m == "calib") View.GONE else View.VISIBLE
-        b.btnBuild.text = getString(if (m == "calib") R.string.compute_calib else R.string.build_model)
-        if (m == "calib") cam.unlock() else cam.lock()
-        newSession()
+    private fun loadSession(sid: String) {
+        val s = store.load(sid) ?: return
+        session = s; mode = if (s.calib) "calib" else "scan"; calib = null
+        if (s.calib) s.shots.firstOrNull { it.state == "done" }?.let { planner(it.w, it.h) }
+        b.modeSel.check(when (s.mode) { "8" -> R.id.mode8; "free" -> R.id.modeFree; else -> R.id.mode18 })
+        applyModeUi(); refresh()
     }
 
-    private fun pushSession() {
-        val s = session ?: return
-        if (!api.configured) return
-        lifecycleScope.launch(Dispatchers.IO) {
-            try { api.putDoc((if (mode == "calib") "calib/" else "sessions/") + s.sid, s.sessionDoc()) } catch (_: Exception) {}
-        }
+    private fun switchMode(m: String) { mode = m; if (m == "calib") cam.unlock() else if (autoLockDone) cam.lock(); newSession() }
+
+    private fun applyModeUi() {
+        b.btnMode.text = getString(if (mode == "calib") R.string.to_scan else R.string.to_calib)
+        b.modeSel.visibility = if (mode == "calib") View.GONE else View.VISIBLE
+        b.convex.visibility = if (mode == "calib") View.GONE else View.VISIBLE
+        b.btnBuild.text = getString(if (mode == "calib") R.string.compute_calib else R.string.build_model)
+        b.btnNew.text = getString(if (mode == "calib") R.string.new_calib else R.string.new_scan)
+        b.sid.text = "session ${session?.sid ?: ""}"
     }
+
+    private fun persist() { session?.let { s -> lifecycleScope.launch(Dispatchers.IO) { try { store.save(s) } catch (_: Exception) {} } } }
 
     private fun requestBuild() {
         val s = session ?: return
-        if (!api.configured) { toast(getString(R.string.set_server)); return }
-        val done = s.shots.filter { it.state == "done" && it.sent }
+        val done = s.shots.filter { it.state == "done" }
         if (mode == "calib") {
             val st = calib?.status()
             if (st == null || st.total < 15) { toast(getString(R.string.calib_more)); return }
-            lifecycleScope.launch(Dispatchers.IO) {
-                try {
-                    api.putDoc("calib/${s.sid}/status/request", JSONObject().put("at", System.currentTimeMillis()).put("device", android.os.Build.MODEL).put("shots", done.size))
-                    withContext(Dispatchers.Main) { toast(getString(R.string.calib_requested)); startActivity(Intent(this@MainActivity, ResultActivity::class.java).putExtra("sid", s.sid).putExtra("calib", true)) }
-                } catch (e: Exception) { withContext(Dispatchers.Main) { toast("request: ${e.message}") } }
-            }
-            return
-        }
-        if (done.size < 8) { toast(getString(R.string.need_shots, fa(done.size))); return }
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                api.putDoc("sessions/${s.sid}/status/request", JSONObject().put("at", System.currentTimeMillis()).put("shots", done.size)
-                    .put("photos", done.size).put("convex", b.convex.isChecked).put("name", s.name).put("device", android.os.Build.MODEL))
-                withContext(Dispatchers.Main) { startActivity(Intent(this@MainActivity, ResultActivity::class.java).putExtra("sid", s.sid)) }
-            } catch (e: Exception) { withContext(Dispatchers.Main) { toast("request: ${e.message}") } }
-        }
+        } else if (done.size < 8) { toast(getString(R.string.need_shots, fa(done.size))); return }
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+            notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)   // progress notification; the build runs either way
+        store.save(s)
+        ContextCompat.startForegroundService(this, Intent(this, BuildService::class.java).putExtra("sid", s.sid).putExtra("calib", mode == "calib").putExtra("convex", b.convex.isChecked))
+        startActivity(Intent(this, ResultActivity::class.java).putExtra("sid", s.sid).putExtra("calib", mode == "calib"))
     }
 
     // ---------------- UI ----------------
@@ -252,8 +245,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val s = session ?: return
         if (mode == "calib") {
             val st = calib?.status()
-            b.overlay.calibCells = calib?.cellCounts(); b.overlay.layout = null
-            b.next.text = st?.next ?: ""
+            b.overlay.calibCells = calib?.cellCounts() ?: IntArray(24); b.overlay.layout = null
+            b.next.text = st?.next ?: CalibPlanner(4000, 3000).status().next
             b.count.text = getString(R.string.calib_count, fa(st?.total ?: 0), fa(st?.rolled ?: 0), fa(st?.cellsCovered ?: 0), fa(st?.cellsTotal ?: 24))
             b.proto.text = ""
             b.overlay.invalidate(); return
@@ -269,7 +262,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val cov = s.coverage(); val weak = cov.filter { !it.ready }
         val nk = s.nextSlot()
         b.next.text = when {
-            done.isNotEmpty() && cov.isNotEmpty() && weak.isEmpty() && cov.size >= 4 -> getString(R.string.enough)
+            done.isNotEmpty() && cov.isNotEmpty() && weak.isEmpty() && cov.size >= 4 && rotated >= 2 && low >= 4 -> getString(R.string.enough)
             done.size >= 6 && rotated < 2 -> getString(R.string.need_rotated)
             done.size >= 6 && low < 4 -> getString(R.string.need_low)
             weak.isNotEmpty() && done.size >= 4 -> getString(R.string.weak_marker, weak[0].id.toString(), fa(weak[0].n))
@@ -277,8 +270,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             nk != null -> { val (bb, aa) = nk.split("-").map { it.toInt() }; getString(R.string.next_fmt, L.clock[aa], L.bandName[bb]) }
             else -> getString(R.string.all_slots)
         }
-        val last = done.lastOrNull()
-        b.lastShot.text = last?.let { getString(R.string.last_fmt, fa(it.n), fa(it.stickers.size), fa(it.board?.ids?.size ?: 0), it.sharp.toInt().toString(), it.pose?.let { p -> "${p.az.toInt()}°/${p.el.toInt()}°" } ?: "-", if (it.sent) "✓" else "…") } ?: ""
         b.overlay.invalidate()
     }
 

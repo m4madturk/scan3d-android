@@ -10,9 +10,11 @@ android {
         applicationId = "ir.scan3d.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1"
-        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }   // real phones only; drops ~95 MB of x86 libs
+        versionCode = 2
+        versionName = "0.2"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Real phones only (drops ~95 MB of x86 OpenCV libs). CI passes -Pscan3d.allAbis=true for the emulator.
+        if (project.findProperty("scan3d.allAbis") != "true") ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
     buildTypes {
         release {
@@ -43,9 +45,12 @@ dependencies {
     implementation("androidx.camera:camera-view:$camerax")
     implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("org.opencv:opencv:4.10.0")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.json:json:20240303")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:rules:1.6.1")
+    androidTestImplementation("androidx.test:core:1.6.1")
 }

@@ -16,10 +16,10 @@ import kotlin.math.min
  *   - no motion blur, no changing focus
  *
  * The planner turns each captured frame's board corners into coverage and tells the user
- * what is still missing. The actual solve runs on the server (calib_session.py) with
- * uncertainty estimates; the phone only guides the capture.
+ * what is still missing. The actual solve runs on the phone (engine/Calibrator.kt) with
+ * uncertainty estimates once the user presses "compute".
  */
-class CalibPlanner(private val width: Int, private val height: Int) {
+class CalibPlanner(val width: Int, val height: Int) {
     private val gridX = 4; private val gridY = 6
     private val cells = IntArray(gridX * gridY)
     val views = ArrayList<View>()

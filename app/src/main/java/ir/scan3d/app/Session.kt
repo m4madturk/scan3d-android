@@ -8,7 +8,7 @@ import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.hypot
 
-/** One captured shot, as stored on the server (same schema as the web app). */
+/** One captured shot, as stored in the session file (same schema as the web app / Python engine). */
 class Shot(val n: Int, val id: String) {
     var state = "busy"            // busy | done | error
     var sent = false
@@ -47,10 +47,31 @@ class Shot(val n: Int, val id: String) {
             .put("targets", targets).put("charuco", charuco ?: JSONObject.NULL)
             .put("asset", assetId?.let { JSONObject().put("id", it) } ?: JSONObject.NULL)
     }
+
+    companion object {
+        fun fromJson(j: JSONObject, dir: File): Shot {
+            val s = Shot(j.getInt("n"), "k" + j.getInt("n"))
+            s.state = "done"; s.w = j.getInt("w"); s.h = j.getInt("h")
+            val ex = j.optJSONObject("exif"); s.orientation = ex?.optInt("orientation", 1) ?: 1; s.landscape = ex?.optBoolean("landscape", false) ?: false
+            s.sharp = j.optDouble("sharp", 0.0); s.millis = j.optLong("ms", 0)
+            j.optJSONObject("pose")?.let { p ->
+                val rv = p.getJSONArray("rvec"); val tv = p.getJSONArray("tvec")
+                s.pose = Pose(p.getDouble("az"), p.getDouble("el"), p.getDouble("dist_m"), DoubleArray(3) { rv.getDouble(it) }, DoubleArray(3) { tv.getDouble(it) })
+            }
+            s.slotKey = j.optJSONObject("slot")?.optString("key")
+            val tg = j.getJSONObject("targets"); val st = ArrayList<Sticker>()
+            for (k in tg.keys()) { val a = tg.getJSONArray(k); st.add(Sticker(k.toInt(), FloatArray(8) { a.getDouble(it).toFloat() })) }
+            s.stickers = st
+            j.optJSONObject("charuco")?.let { c -> val ia = c.getJSONArray("ids"); val pa = c.getJSONArray("pts")
+                s.board = BoardObs(IntArray(ia.length()) { ia.getInt(it) }, FloatArray(pa.length()) { pa.getDouble(it).toFloat() }) }
+            val th = File(dir, "thumb${s.n}.jpg"); if (th.exists()) s.thumb = th
+            return s
+        }
+    }
 }
 
 /** A scan session: slots, coverage and protocol bookkeeping. Mirrors the web app's logic. */
-class Session(ctx: Context, val sid: String, var name: String, var mode: String) {
+class Session(ctx: Context, val sid: String, var name: String, var mode: String, val calib: Boolean = false) {
     val shots = ArrayList<Shot>()
     val dir: File = File(ctx.filesDir, "sessions/$sid").apply { mkdirs() }
 
