@@ -54,6 +54,26 @@ class Store(ctx: Context) {
         return null
     }
 
+    fun profileFiles(): List<File> = profiles.listFiles()?.filter { it.name.endsWith(".json") } ?: emptyList()
+
+    /** Debug bundle: session + result + log + lens profiles + quarter-size photos, as one zip. */
+    fun exportZip(sid: String, out: File) {
+        val dir = sessionDir(sid)
+        java.util.zip.ZipOutputStream(out.outputStream().buffered()).use { z ->
+            fun put(name: String, bytes: ByteArray) { z.putNextEntry(java.util.zip.ZipEntry(name)); z.write(bytes); z.closeEntry() }
+            for (n in listOf("session.json", "result.json", "log.txt")) File(dir, n).takeIf { it.exists() }?.let { put("$sid/$n", it.readBytes()) }
+            for (p in profileFiles()) put("$sid/profiles/${p.name}", p.readBytes())
+            dir.listFiles()?.filter { it.name.startsWith("shot") && it.name.endsWith(".jpg") }?.sortedBy { it.name }?.forEach { f ->
+                val o = android.graphics.BitmapFactory.Options().apply { inSampleSize = 4 }
+                val bm = android.graphics.BitmapFactory.decodeFile(f.absolutePath, o) ?: return@forEach
+                val bos = java.io.ByteArrayOutputStream(); bm.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, bos); bm.recycle()
+                // keep the EXIF orientation so the receiver can tell how the phone was held
+                val exif = androidx.exifinterface.media.ExifInterface(f.absolutePath).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, 1)
+                put("$sid/${f.nameWithoutExtension}_q_o$exif.jpg", bos.toByteArray())
+            }
+        }
+    }
+
     fun profileSummary(): String? {
         val fs = profiles.listFiles()?.filter { it.name.endsWith(".json") } ?: return null
         if (fs.isEmpty()) return null

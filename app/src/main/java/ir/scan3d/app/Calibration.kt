@@ -26,21 +26,32 @@ class CalibPlanner(val width: Int, val height: Int) {
 
     data class View(val tiltDeg: Double, val tiltDir: Int, val rolled: Boolean, val fill: Double, val corners: Int, val sharp: Double)
 
-    /** tiltDir: 0 frontal, 1 top, 2 right, 3 bottom, 4 left (where the far edge of the board is). */
-    fun add(board: BoardObs?, rolled: Boolean, sharp: Double): View? {
+    /**
+     * tiltDir: 0 frontal, 1 camera at 6 o'clock (top edge of the board far), 2 camera at 9 o'clock,
+     * 3 camera at 12 o'clock, 4 camera at 3 o'clock. With a pose the tilt comes from the board frame
+     * (exact); without one, from the foreshortening of the board in the image.
+     * Coverage cells are counted in the DISPLAY frame (sensor rotated 90 degrees clockwise, the way the
+     * portrait preview shows it), 4 columns x 6 rows, matching OverlayView.
+     */
+    fun add(board: BoardObs?, rolled: Boolean, sharp: Double, pose: Pose? = null): View? {
         board ?: return null
         val n = board.ids.size
         if (n < 12) return null
         var minx = 1e9; var maxx = -1e9; var miny = 1e9; var maxy = -1e9
+        val dispW = height.toDouble(); val dispH = width.toDouble()
         for (i in 0 until n) {
             val x = board.pts[2 * i].toDouble(); val y = board.pts[2 * i + 1].toDouble()
             minx = min(minx, x); maxx = max(maxx, x); miny = min(miny, y); maxy = max(maxy, y)
-            val cx = (x / width * gridX).toInt().coerceIn(0, gridX - 1); val cy = (y / height * gridY).toInt().coerceIn(0, gridY - 1)
+            val xd = height - 1 - y; val yd = x
+            val cx = (xd / dispW * gridX).toInt().coerceIn(0, gridX - 1); val cy = (yd / dispH * gridY).toInt().coerceIn(0, gridY - 1)
             cells[cy * gridX + cx]++
         }
         val fill = ((maxx - minx) * (maxy - miny)) / (width.toDouble() * height)
-        // tilt from the foreshortening of the board: ratio of square sizes between far and near rows
-        val (tilt, dir) = estimateTilt(board)
+        val (tilt, dir) = if (pose != null) {
+            val t = 90.0 - pose.el
+            val d = if (t < 12) 0 else when { pose.az >= 135 && pose.az < 225 -> 1; pose.az >= 225 && pose.az < 315 -> 2; pose.az >= 45 && pose.az < 135 -> 4; else -> 3 }
+            t to d
+        } else estimateTilt(board)
         val v = View(tilt, dir, rolled, fill, n, sharp)
         views.add(v)
         return v
@@ -79,7 +90,10 @@ class CalibPlanner(val width: Int, val height: Int) {
         return tilt to dir
     }
 
-    data class Status(val cellsCovered: Int, val cellsTotal: Int, val frontal: Int, val tilted: IntArray, val rolled: Int, val close: Int, val total: Int, val next: String, val done: Boolean)
+    data class Status(val cellsCovered: Int, val cellsTotal: Int, val frontal: Int, val tilted: IntArray, val rolled: Int, val close: Int, val total: Int, val next: String, val done: Boolean, val target: Target)
+
+    /** What the next photo should look like: kind = front | close | tilt (dir) | roll | cover (cell) | more | done. */
+    data class Target(val kind: String, val dir: Int = 0, val cell: Int = -1)
 
     fun status(): Status {
         val covered = cells.count { it >= 3 }
@@ -88,20 +102,21 @@ class CalibPlanner(val width: Int, val height: Int) {
         val rolled = views.count { it.rolled }
         val close = views.count { it.fill > 0.35 }
         val total = views.size
-        val next = when {
-            total < 3 -> "اول ۳ عکس از روبه‌رو بگیر؛ صفحه بیشتر کادر رو پر کنه."
-            close < 6 -> "نزدیک‌تر شو تا صفحه حداقل یک‌سوم کادر رو پر کنه (${close}/6)."
-            tilted[1] < 2 -> "گوشی رو حدود ۴۰ درجه کج کن، طوری که لبه‌ی بالایی صفحه دورتر باشه (${tilted[1]}/2)."
-            tilted[3] < 2 -> "همین کار از پایین: لبه‌ی پایینی صفحه دورتر (${tilted[3]}/2)."
-            tilted[2] < 2 -> "کج از راست: لبه‌ی راست دورتر (${tilted[2]}/2)."
-            tilted[4] < 2 -> "کج از چپ: لبه‌ی چپ دورتر (${tilted[4]}/2)."
-            rolled < 4 -> "گوشی رو افقی (۹۰ درجه چرخیده) بگیر و ۴ عکس بگیر (${rolled}/4)."
-            covered < cellsTotal() - 2 -> "صفحه رو به گوشه‌ها و لبه‌های کادر ببر؛ ${cellsTotal() - covered} خونه هنوز خالیه."
-            total < 25 -> "خوبه. چند عکس دیگه با فاصله و زاویه‌های متفاوت بگیر (${total}/25)."
-            else -> "کالیبراسیون کامله. دکمه‌ی «محاسبه» رو بزن."
+        val emptyCell = cells.indices.firstOrNull { cells[it] < 3 } ?: -1
+        val (next, target) = when {
+            total < 3 -> "اول ۳ عکس از روبه‌رو بگیر؛ صفحه بیشتر کادر رو پر کنه. (${total}/3)" to Target("front")
+            close < 6 -> "نزدیک‌تر شو تا صفحه حداقل یک‌سوم کادر رو پر کنه. (${close}/6)" to Target("close")
+            tilted[1] < 2 -> "مثل تصویر: از سمت ساعت ۶ (نزدیک خودت) با حدود ۴۰ درجه شیب به صفحه نگاه کن. (${tilted[1]}/2)" to Target("tilt", 1)
+            tilted[3] < 2 -> "حالا از سمت ساعت ۱۲ (آن‌طرف صفحه) با همون شیب. (${tilted[3]}/2)" to Target("tilt", 3)
+            tilted[2] < 2 -> "از سمت ساعت ۹ (چپ) با شیب ۴۰ درجه. (${tilted[2]}/2)" to Target("tilt", 2)
+            tilted[4] < 2 -> "از سمت ساعت ۳ (راست) با شیب ۴۰ درجه. (${tilted[4]}/2)" to Target("tilt", 4)
+            rolled < 4 -> "گوشی رو ۹۰ درجه بچرخون (افقی بگیر) و ۴ عکس بگیر. (${rolled}/4)" to Target("roll")
+            covered < cellsTotal() - 2 -> "صفحه رو به گوشه‌ها و لبه‌های کادر ببر؛ ${cellsTotal() - covered} خونه‌ی شبکه هنوز خالیه." to Target("cover", 0, emptyCell)
+            total < 25 -> "خوبه. چند عکس دیگه با فاصله و زاویه‌های متفاوت بگیر. (${total}/25)" to Target("more")
+            else -> "کالیبراسیون کامله. دکمه‌ی «محاسبه‌ی کالیبراسیون» رو بزن." to Target("done")
         }
         val done = total >= 25 && close >= 6 && rolled >= 4 && covered >= cellsTotal() - 2 && (1..4).all { tilted[it] >= 2 }
-        return Status(covered, cellsTotal(), frontal, tilted, rolled, close, total, next, done)
+        return Status(covered, cellsTotal(), frontal, tilted, rolled, close, total, next, done, target)
     }
 
     fun cellsTotal() = gridX * gridY

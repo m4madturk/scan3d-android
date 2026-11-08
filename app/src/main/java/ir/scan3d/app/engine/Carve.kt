@@ -59,12 +59,16 @@ object Carve {
         val Rs = views.map { it.pose.R() }
         val votes = ShortArray(nx * ny * nz)
         java.util.Arrays.fill(g.f, Float.POSITIVE_INFINITY)
+        // robust fusion: the voxel's distance is the kth most-outside value (k = minVotesOut), so up to
+        // k-1 wrong silhouettes (shadow, hand, mis-segmented board) cannot carve away the object
+        val kk = max(1, minVotesOut); val low = FloatArray(kk)
         for (i in 0 until nx) {
             val x = g.x0 + i * voxel
             for (j in 0 until ny) { val y = g.y0 + j * voxel
                 for (k in 0 until nz) { val z = g.z0 + k * voxel
                     val id = g.idx(i, j, k)
                     var fmin = Float.POSITIVE_INFINITY; var nOut = 0
+                    java.util.Arrays.fill(low, Float.POSITIVE_INFINITY)
                     for ((vi, v) in views.withIndex()) {
                         val R = Rs[vi]; val t = v.pose.t
                         // board frame has z into the board: world point (x, y, -z)
@@ -78,9 +82,12 @@ object Carve {
                         val dpx = bilinear(sdfs[vi], v.w, u, vv) + marginPx
                         if (dpx < 0) nOut++
                         val dmm = (dpx * pcz / v.cam.f).toFloat()
-                        if (dmm < fmin) fmin = dmm
+                        if (kk == 1) { if (dmm < fmin) fmin = dmm }
+                        else if (dmm < low[kk - 1]) {               // insert into the sorted k smallest
+                            var p = kk - 1; while (p > 0 && low[p - 1] > dmm) { low[p] = low[p - 1]; p-- }; low[p] = dmm
+                        }
                     }
-                    if (minVotesOut > 1 && nOut < minVotesOut && fmin < 0) fmin = (voxel * 0.5).toFloat()
+                    if (kk > 1) fmin = if (low[kk - 1].isInfinite()) { var m = Float.POSITIVE_INFINITY; for (q in 0 until kk) if (!low[q].isInfinite()) m = low[q]; m } else low[kk - 1]
                     for (pl in planes) {
                         val rx = x - pl.p.x; val ry = y - pl.p.y; val rz = z - pl.p.z
                         val along = rx * pl.n.x + ry * pl.n.y + rz * pl.n.z
@@ -104,6 +111,21 @@ object Carve {
     }
 
     /** Bounds (z-up, mm) of the negative region of a coarse grid, padded. */
+    /** Diagnostics: per view, which fraction of the sampled volume projects inside its silhouette. */
+    fun insideFractions(views: List<SilView>, bounds: Array<DoubleArray>, step: Double): DoubleArray {
+        val out = DoubleArray(views.size)
+        for ((vi, v) in views.withIndex()) {
+            val R = v.pose.R(); val t = v.pose.t; var n = 0; var ins = 0
+            var x = bounds[0][0]; while (x <= bounds[0][1]) { var y = bounds[1][0]; while (y <= bounds[1][1]) { var z = bounds[2][0]; while (z <= bounds[2][1]) {
+                n++
+                val pcx = R[0][0] * x + R[0][1] * y - R[0][2] * z + t[0]; val pcy = R[1][0] * x + R[1][1] * y - R[1][2] * z + t[1]; val pcz = R[2][0] * x + R[2][1] * y - R[2][2] * z + t[2]
+                if (pcz > 0) v.cam.project(Vec3(pcx, pcy, pcz))?.let { pr -> val u = pr[0].toInt(); val w = pr[1].toInt(); if (u in 0 until v.w && w in 0 until v.h && v.mask[w * v.w + u]) ins++ }
+                z += step }; y += step }; x += step }
+            out[vi] = if (n > 0) ins.toDouble() / n else 0.0
+        }
+        return out
+    }
+
     fun insideBounds(g: Grid, pad: Double): Array<DoubleArray>? {
         var x0 = Double.MAX_VALUE; var x1 = -Double.MAX_VALUE; var y0 = Double.MAX_VALUE; var y1 = -Double.MAX_VALUE; var z1 = -Double.MAX_VALUE
         for (i in 0 until g.nx) for (j in 0 until g.ny) for (k in 0 until g.nz) if (g.f[g.idx(i, j, k)] > 0) {

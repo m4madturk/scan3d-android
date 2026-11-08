@@ -25,22 +25,26 @@
         app:layout_constraintTop_toTopOf="parent" app:layout_constraintLeft_toLeftOf="parent" />
 
     <!-- the panel may take at most the lower 50 % of the screen; beyond that it scrolls -->
-    <androidx.constraintlayout.widget.Guideline android:id="@+id/guide" android:layout_width="wrap_content" android:layout_height="wrap_content"
+    <androidx.constraintlayout.widget.Guideline android:id="@+id/panelTop" android:layout_width="wrap_content" android:layout_height="wrap_content"
         android:orientation="horizontal" app:layout_constraintGuide_percent="0.50" />
 
     <androidx.core.widget.NestedScrollView android:id="@+id/panel"
         android:layout_width="0dp" android:layout_height="wrap_content"
         android:background="#0F1513" android:fillViewport="false"
         app:layout_constrainedHeight="true" app:layout_constraintVertical_bias="1"
-        app:layout_constraintTop_toTopOf="@id/guide" app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintTop_toTopOf="@id/panelTop" app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent" app:layout_constraintEnd_toEndOf="parent">
 
         <LinearLayout android:id="@+id/panelInner" android:orientation="vertical"
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:paddingStart="10dp" android:paddingEnd="10dp" android:paddingTop="8dp" android:paddingBottom="8dp" android:layoutDirection="rtl">
 
-            <TextView android:id="@+id/next" android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:background="@drawable/bg_hint" android:textColor="#E5ECE8" android:padding="10dp" android:textSize="14sp" android:lineSpacingExtra="2dp" />
+            <!-- guidance: animated 3D view of where to hold the phone (tap for the tutorial) + the instruction -->
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:background="@drawable/bg_hint" android:padding="6dp" android:gravity="center_vertical">
+                <ir.scan3d.app.GuideView android:id="@+id/guide" android:layout_width="132dp" android:layout_height="132dp" />
+                <TextView android:id="@+id/next" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                    android:textColor="#E5ECE8" android:paddingStart="8dp" android:paddingEnd="8dp" android:textSize="13.5sp" android:lineSpacingExtra="2dp" />
+            </LinearLayout>
 
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:paddingTop="6dp" android:gravity="center_vertical">
                 <TextView android:id="@+id/count" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:textColor="#E5ECE8" android:textSize="15sp" />
@@ -73,6 +77,7 @@
                 <Button android:id="@+id/btnNew" style="@style/Scan3D.Button.Outlined" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/new_scan" />
                 <Button android:id="@+id/btnMode" style="@style/Scan3D.Button.Outlined" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/to_calib" />
                 <Button android:id="@+id/btnSessions" style="@style/Scan3D.Button.Outlined" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/sessions" />
+                <Button android:id="@+id/btnHelp" style="@style/Scan3D.Button.Outlined" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/help" />
             </LinearLayout>
             <TextView android:id="@+id/sid" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#5B6862" android:textSize="11sp" android:fontFamily="monospace" android:textDirection="ltr" android:gravity="start" />
         </LinearLayout>

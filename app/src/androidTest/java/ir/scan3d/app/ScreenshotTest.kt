@@ -56,18 +56,31 @@ class ScreenshotTest {
         return st.sessionDir(sid)
     }
 
+    private fun noTutorial() { ctx.getSharedPreferences("scan3d", android.content.Context.MODE_PRIVATE).edit().putBoolean("tutorial_seen", true).commit() }
+
     @Test fun mainScan() {
-        scanSession("s_demo", false, 7)
-        ActivityScenario.launch<MainActivity>(Intent(ctx, MainActivity::class.java).putExtra("sid", "s_demo")).use {
+        noTutorial(); scanSession("s_demo", false, 7)
+        // pretend the board is seen from 5 o'clock, 30 degrees up, 36 cm, upright
+        ActivityScenario.launch<MainActivity>(Intent(ctx, MainActivity::class.java).putExtra("sid", "s_demo").putExtra("demoPose", doubleArrayOf(150.0, 30.0, 0.36, 0.0))).use {
             Thread.sleep(3500)   // camera start
             shoot("01_main_scan")
         }
     }
 
     @Test fun mainCalib() {
-        ActivityScenario.launch<MainActivity>(Intent(ctx, MainActivity::class.java).putExtra("mode", "calib")).use {
+        noTutorial()
+        ActivityScenario.launch<MainActivity>(Intent(ctx, MainActivity::class.java).putExtra("mode", "calib").putExtra("demoPose", doubleArrayOf(180.0, 80.0, 0.30, 0.0))).use {
             Thread.sleep(3000)
             shoot("02_main_calib")
+        }
+    }
+
+    @Test fun tutorial() {
+        for ((i, pg) in listOf(0, 2, 4, 6).withIndex()) {
+            ActivityScenario.launch<TutorialActivity>(Intent(ctx, TutorialActivity::class.java).putExtra("page", pg)).use {
+                Thread.sleep(900)
+                shoot("07_tutorial_p$pg")
+            }
         }
     }
 

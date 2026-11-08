@@ -32,6 +32,19 @@ class ResultActivity : AppCompatActivity() {
         val dir = Store(this).sessionDir(sid)
         val resultFile = File(dir, "result.json")
         b.btnLog.setOnClickListener { val f = File(dir, "log.txt"); b.log.text = if (f.exists()) f.readText() else "-"; b.log.visibility = if (b.log.visibility == android.view.View.VISIBLE) android.view.View.GONE else android.view.View.VISIBLE }
+        b.btnExport.setOnClickListener {
+            b.btnExport.isEnabled = false
+            lifecycleScope.launch(Dispatchers.IO) {
+                val out = File(getExternalFilesDir(null), "scan3d_$sid.zip")
+                val ok = try { Store(this@ResultActivity).exportZip(sid, out); true } catch (e: Exception) { false }
+                withContext(Dispatchers.Main) {
+                    b.btnExport.isEnabled = true
+                    if (!ok) { android.widget.Toast.makeText(this@ResultActivity, "export failed", android.widget.Toast.LENGTH_SHORT).show(); return@withContext }
+                    val uri = FileProvider.getUriForFile(this@ResultActivity, "$packageName.files", out)
+                    startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("application/zip").putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "zip"))
+                }
+            }
+        }
         lifecycleScope.launch(Dispatchers.IO) {
             var last = ""
             while (isActive) {

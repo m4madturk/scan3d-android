@@ -26,6 +26,7 @@
         </activity>
         <activity android:name=".ResultActivity" android:exported="false" android:label="@string/result" />
         <activity android:name=".SessionsActivity" android:exported="false" android:label="@string/sessions" />
+        <activity android:name=".TutorialActivity" android:exported="false" android:screenOrientation="portrait" />
         <service android:name=".BuildService" android:exported="false" android:foregroundServiceType="dataSync" />
         <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.files" android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />

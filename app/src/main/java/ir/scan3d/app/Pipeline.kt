@@ -73,14 +73,31 @@ object Pipeline {
         val sc = min(1.0, SIL_MAX / max(w, h).toDouble())
         val sw = (w * sc).toInt(); val sh = (h * sc).toInt()
         val camS = Camera(geo.camera.f * sc, geo.camera.cx * sc, geo.camera.cy * sc, geo.camera.k1, geo.camera.k2)
+        var dropped = 0
         for ((k, ui) in use.withIndex()) {
             val pose = geo.poses[k] ?: continue
             progress("دورخط عکس ${k + 1} از ${use.size}…", 0.1 + 0.4 * k / use.size)
             val gray = loadGray(files[ui], sw, sh) ?: continue
             val r = Silhouette.extract(gray, sw, sh, camS, pose, boardTemplate) ?: run { log("shot ${shots[ui].n}: no silhouette"); null } ?: continue
-            log("shot ${shots[ui].n}: silhouette solidity %.2f".format(r.solidity))
+            // sanity: the stickers seen in this shot sit on the object, so their solved centres must project inside the mask
+            val seen = shots[ui].stickers.map { it.id }.toSet()
+            var tot = 0; var inside = 0
+            for (st in geo.stickers) if (st.id in seen) {
+                val pr = camS.project(pose.toCamera(st.centre)) ?: continue
+                tot++
+                val u = pr[0].toInt(); val v = pr[1].toInt()
+                if (u in 0 until sw && v in 0 until sh) {
+                    var hit = false
+                    for (dv in -3..3) for (du in -3..3) { val uu = u + du; val vv = v + dv; if (uu in 0 until sw && vv in 0 until sh && r.mask[vv * sw + uu]) hit = true }
+                    if (hit) inside++
+                }
+            }
+            val area = r.area.toDouble() / (sw * sh)
+            if (tot >= 3 && inside < 0.6 * tot) { dropped++; log("shot ${shots[ui].n}: silhouette misses the stickers ($inside/$tot inside, area %.1f%%); dropped".format(100 * area)); continue }
+            log("shot ${shots[ui].n}: silhouette solidity %.2f, stickers inside $inside/$tot, area %.1f%%".format(r.solidity, 100 * area))
             views.add(SilView(sw, sh, r.mask, camS, pose))
         }
+        if (dropped > 0) log("$dropped silhouette(s) dropped by the sticker check")
         require(views.size >= 2) { "fewer than 2 usable silhouettes" }
 
         // marker planes (z-up frame)
@@ -88,12 +105,28 @@ object Pipeline {
             PlaneCut(Vec3(it.centre.x, it.centre.y, -it.centre.z), Vec3(it.normalOut.x, it.normalOut.y, -it.normalOut.z), if (convex) null else 20.0)
         }
         progress("تراش اولیه…", 0.55)
-        val coarse = Carve.carve(views, arrayOf(doubleArrayOf(-15.0, 190.0), doubleArrayOf(-15.0, 265.0), doubleArrayOf(0.0, 120.0)), 2.0, 0.5, planes, 1)
-        val b = Carve.insideBounds(coarse, 4.0) ?: throw IllegalStateException("object not found inside the silhouettes")
+        // tolerate a few wrong silhouettes: a voxel is carved only when >= votes views see it outside
+        var votes = max(1, Math.round(0.06 * views.size).toInt())
+        val boardBounds = arrayOf(doubleArrayOf(-15.0, 190.0), doubleArrayOf(-15.0, 265.0), doubleArrayOf(0.0, 120.0))
+        // where do the solved stickers sit? the object must contain them
+        val stZ = geo.stickers.map { -it.centre.z }
+        log("stickers z-up range %.1f .. %.1f mm; carve tolerance $votes of ${views.size} views".format(stZ.minOrNull() ?: 0.0, stZ.maxOrNull() ?: 0.0))
+        var coarse = Carve.carve(views, boardBounds, 2.0, 0.5, planes, votes)
+        var b = Carve.insideBounds(coarse, 4.0)
+        if (b == null) {
+            val fr = Carve.insideFractions(views, boardBounds, 8.0)
+            fr.forEachIndexed { i, f -> log("view ${i + 1}: %.1f%% of the board volume inside its silhouette".format(100 * f)) }
+            votes = max(2, Math.round(0.25 * views.size).toInt())
+            log("empty intersection; retrying with tolerance $votes")
+            coarse = Carve.carve(views, boardBounds, 2.0, 0.5, planes, votes)
+            b = Carve.insideBounds(coarse, 4.0)
+        }
+        if (b == null) throw IllegalStateException("object not found inside the silhouettes (see log: silhouettes do not intersect)")
         val span = DoubleArray(3) { b[it][1] - b[it][0] }
+        log("object bounds x %.0f..%.0f y %.0f..%.0f z 0..%.0f mm".format(b[0][0], b[0][1], b[1][0], b[1][1], b[2][1]))
         val vox = max(voxel, Math.cbrt(span[0] * span[1] * span[2] / 1.0e7))    // cap at ~10 M voxels (grid + marching cubes ~ 100 MB)
         progress("تراش نهایی (${"%.2f".format(vox)} mm)…", 0.6)
-        val g = Carve.carve(views, b, vox, 0.5, planes, 1) { p -> progress("تراش نهایی…", 0.6 + 0.3 * p) }
+        val g = Carve.carve(views, b, vox, 0.5, planes, votes) { p -> progress("تراش نهایی…", 0.6 + 0.3 * p) }
         progress("ساخت مش…", 0.92)
         val mesh = MarchingCubes.run(g)
         val bb = mesh.bounds()

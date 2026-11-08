@@ -32,7 +32,7 @@ class Shot(val n: Int, val id: String) {
             JSONObject().put("ids", JSONArray(it.ids.toList())).put("pts", JSONArray(it.pts.map { v -> v.toDouble() }))
         }
         val p = pose?.let {
-            JSONObject().put("az", it.az).put("el", it.el).put("dist_m", it.dist)
+            JSONObject().put("az", it.az).put("el", it.el).put("dist_m", it.dist).put("roll", it.roll)
                 .put("rvec", JSONArray(it.rvec.toList())).put("tvec", JSONArray(it.tvec.toList()))
         }
         val slot = slotKey?.let { k -> val (b, a) = k.split("-"); JSONObject().put("band", b.toInt()).put("az", a.toInt()).put("key", k) }
@@ -56,7 +56,7 @@ class Shot(val n: Int, val id: String) {
             s.sharp = j.optDouble("sharp", 0.0); s.millis = j.optLong("ms", 0)
             j.optJSONObject("pose")?.let { p ->
                 val rv = p.getJSONArray("rvec"); val tv = p.getJSONArray("tvec")
-                s.pose = Pose(p.getDouble("az"), p.getDouble("el"), p.getDouble("dist_m"), DoubleArray(3) { rv.getDouble(it) }, DoubleArray(3) { tv.getDouble(it) })
+                s.pose = Pose(p.getDouble("az"), p.getDouble("el"), p.getDouble("dist_m"), DoubleArray(3) { rv.getDouble(it) }, DoubleArray(3) { tv.getDouble(it) }, p.optDouble("roll", 0.0))
             }
             s.slotKey = j.optJSONObject("slot")?.optString("key")
             val tg = j.getJSONObject("targets"); val st = ArrayList<Sticker>()
@@ -76,6 +76,22 @@ class Session(ctx: Context, val sid: String, var name: String, var mode: String,
     val dir: File = File(ctx.filesDir, "sessions/$sid").apply { mkdirs() }
 
     data class Layout(val az: Int, val bands: List<Pair<Double, Double>>, val clock: List<String>, val bandName: List<String>)
+
+    companion object {
+        /**
+         * Marks shots as "rolled" (landscape) from the camera roll measured against the board: the minority
+         * class whose roll differs by ~90 degrees from the majority. Independent of gravity and of how the
+         * board lies on the table; what the solver needs is roll diversity relative to the scene.
+         */
+        fun markRolled(shots: List<Shot>) {
+            val done = shots.filter { it.state == "done" && it.pose != null }
+            if (done.isEmpty()) return
+            // class A: cos(2 roll) > 0 (upright or upside down), class B: sideways
+            val a = done.count { Math.cos(2 * Math.toRadians(it.pose!!.roll)) > 0 }
+            val majorityA = a * 2 >= done.size
+            for (s in done) { val inA = Math.cos(2 * Math.toRadians(s.pose!!.roll)) > 0; s.landscape = inA != majorityA }
+        }
+    }
 
     fun layout(): Layout? = when (mode) {
         "8" -> Layout(4, listOf(10.0 to 45.0, 45.0 to 90.0), listOf("۱۲", "۳", "۶", "۹"), listOf("پایین", "بالا"))

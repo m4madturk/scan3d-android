@@ -32,8 +32,15 @@ data class Sticker(val id: Int, val corners: FloatArray)
 /** ChArUco corners seen in a frame. */
 data class BoardObs(val ids: IntArray, val pts: FloatArray)
 
-/** Where the phone is, relative to the board: azimuth/elevation in degrees, distance in metres. */
-data class Pose(val az: Double, val el: Double, val dist: Double, val rvec: DoubleArray, val tvec: DoubleArray)
+/**
+ * Where the phone is, relative to the board: azimuth (clock direction, 0 = 12 o'clock) and elevation
+ * in degrees, distance in metres, and the roll of the camera about its optical axis relative to an
+ * upright hold (90 = phone held sideways), measured against the board, not gravity.
+ */
+data class Pose(val az: Double, val el: Double, val dist: Double, val rvec: DoubleArray, val tvec: DoubleArray, val roll: Double = 0.0)
+
+/** Live preview result: sticker ids, number of board corners and (if the board is seen) the pose. */
+data class Live(val ids: List<Int>, val nBoard: Int, val pose: Pose?)
 
 data class Analysis(
     val width: Int, val height: Int,
@@ -65,7 +72,10 @@ object Detector {
     private val boardDet by lazy { CharucoDetector(board) }
 
     /** Fast pass for the live preview (gray, already small). Returns sticker ids and board corner count. */
-    fun quick(gray: Mat): Pair<List<Int>, Int> {
+    fun quick(gray: Mat): Pair<List<Int>, Int> { val l = live(gray, null); return l.ids to l.nBoard }
+
+    /** Preview-resolution detection plus a quick board pose (approximate focal length, no distortion). */
+    fun live(gray: Mat, focalPx: Double?): Live {
         val corners = ArrayList<Mat>(); val ids = Mat()
         targetDet.detectMarkers(gray, corners, ids)
         val idList = ArrayList<Int>()
@@ -74,8 +84,14 @@ object Detector {
         val cc = Mat(); val cid = Mat()
         boardDet.detectBoard(gray, cc, cid)
         val nBoard = if (cid.empty()) 0 else cid.rows()
+        var pose: Pose? = null
+        if (nBoard >= 6) {
+            val bids = IntArray(nBoard) { cid.get(it, 0)[0].toInt() }
+            val pts = FloatArray(2 * nBoard); for (i in 0 until nBoard) { val v = cc.get(i, 0); pts[2 * i] = v[0].toFloat(); pts[2 * i + 1] = v[1].toFloat() }
+            pose = try { boardPose(BoardObs(bids, pts), gray.cols(), gray.rows(), focalPx) } catch (_: Exception) { null }
+        }
         cc.release(); cid.release()
-        return idList to nBoard
+        return Live(idList, nBoard, pose)
     }
 
     /** Full analysis of a captured frame (gray, full resolution). */
@@ -189,7 +205,14 @@ object Detector {
         val az = ((Math.toDegrees(atan2(dx, -dy)) + 360.0) % 360.0)
         val el = Math.toDegrees(atan2(abs(C[2]), hypot(dx, dy)))
         val dist = sqrt(dx * dx + dy * dy + C[2] * C[2])
+        // roll: image x-axis in the board frame (first row of R) against the x-axis an upright phone
+        // aimed at the board centre would have (forward x up, with up = -z in this board frame)
+        val fwd = doubleArrayOf(cx - C[0], cy - C[1], 0.0 - C[2]).let { val n = sqrt(it[0] * it[0] + it[1] * it[1] + it[2] * it[2]); doubleArrayOf(it[0] / n, it[1] / n, it[2] / n) }
+        val upx = 0.0; val upy = 0.0; val upz = -1.0
+        val r0x = fwd[1] * upz - fwd[2] * upy; val r0y = fwd[2] * upx - fwd[0] * upz
+        val thetaExp = atan2(r0y, r0x); val thetaMeas = atan2(Rm[0][1], Rm[0][0])
+        var roll = Math.toDegrees(thetaMeas - thetaExp); roll = ((roll + 540.0) % 360.0) - 180.0
         obj.release(); img.release(); K.release(); D.release(); rvec.release(); tvec.release(); R.release()
-        return Pose(az, el, dist, r, t)
+        return Pose(az, el, dist, r, t, roll)
     }
 }

@@ -108,5 +108,20 @@ class EngineTest {
         assertTrue(mesh.volume() > 0)
         val out = ByteArrayOutputStream(); mesh.writeStl(out)
         assertEquals(84 + 50 * mesh.triangleCount, out.size())
+
+        // robust fusion: one deliberately wrong silhouette (empty mask) must not destroy the object when 2 votes are required
+        val bad = SilView(W, H, BooleanArray(W * H), cam, views[0].pose)
+        val views2 = views + bad
+        val coarse1 = Carve.carve(views2, arrayOf(doubleArrayOf(0.0, 175.0), doubleArrayOf(0.0, 250.0), doubleArrayOf(0.0, 100.0)), 2.0, 1.0, planes, 1)
+        assertTrue("one empty silhouette carves everything with tolerance 1", Carve.insideBounds(coarse1, 4.0) == null)
+        val coarse2 = Carve.carve(views2, arrayOf(doubleArrayOf(0.0, 175.0), doubleArrayOf(0.0, 250.0), doubleArrayOf(0.0, 100.0)), 2.0, 1.0, planes, 2)
+        val b2 = Carve.insideBounds(coarse2, 4.0)!!
+        val g2 = Carve.carve(views2, b2, 0.6, 1.0, planes, 2)
+        val mesh2 = MarchingCubes.run(g2); val bb2 = mesh2.bounds()
+        println("tolerant carve: size %.1f x %.1f x %.1f; volume %.1f cm3".format(bb2[1][0] - bb2[0][0], bb2[1][1] - bb2[0][1], bb2[1][2] - bb2[0][2], mesh2.volume() / 1000))
+        assertEquals(50.0, bb2[1][0] - bb2[0][0], 2.5); assertEquals(27.0, bb2[1][2] - bb2[0][2], 1.5)
+        assertEquals(mesh.volume(), mesh2.volume(), 0.03 * mesh.volume())
+        val fr = Carve.insideFractions(views2, b2, 4.0)
+        assertEquals(0.0, fr.last(), 1e-9); assertTrue(fr[0] > 0.2)
     }
 }
