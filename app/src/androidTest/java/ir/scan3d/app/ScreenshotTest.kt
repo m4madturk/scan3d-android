@@ -102,11 +102,11 @@ class ScreenshotTest {
         val dir = scanSession("s_done", false, 14)
         // a tilted rounded box as the "scan", run through the real fitter so the clean section shows real numbers
         val truth = ir.scan3d.app.engine.ShapeFit.Params(0.0, 0.0, Math.toRadians(12.0), 66.0, 58.0, 27.0, 10.0, 5.0, Math.toRadians(2.5), Math.toRadians(-1.0))
-        val mesh = ir.scan3d.app.engine.ShapeFit.mesh(truth.copy().also { it.tx = 0.0; it.ty = 0.0 }, 0.6)
+        val mesh = ir.scan3d.app.engine.ShapeFit.mesh(truth.copy().also { it.tx = 0.0; it.ty = 0.0 })
         mesh.writeStl(File(dir, "model.stl"))
         Preview.render(mesh, File(dir, "preview.png"))
         val fit = ir.scan3d.app.engine.ShapeFit.fit(mesh)!!
-        val clean = ir.scan3d.app.engine.ShapeFit.mesh(fit.params, 0.6)
+        val clean = ir.scan3d.app.engine.ShapeFit.mesh(fit.params)
         clean.writeStl(File(dir, "model_clean.stl")); Preview.render(clean, File(dir, "preview_clean.png"))
         val rep = Pipeline.Report(doubleArrayOf(66.4, 58.3, 27.0), 97.2, 14, 7, 0.31, 7, 14,
             listOf("only 2 rolled photos; focal length and principal point weakly separated"), 148.0, mesh.triangleCount, fit)

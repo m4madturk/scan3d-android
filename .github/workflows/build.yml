@@ -16,7 +16,7 @@ jobs:
       - name: Engine unit tests (pure Kotlin, JVM)
         run: |
           set -o pipefail
-          gradle testReleaseUnitTest --no-daemon --stacktrace -i 2>&1 | grep -E "EngineTest|solve took|carve|calib:|sticker|silhouette|pnp:|mean centre|FAILED|PASSED|BUILD|error:|Assertion|^e: " | head -100
+          gradle testReleaseUnitTest --no-daemon --stacktrace -i 2>&1 | grep -E "EngineTest|solve took|shape fit|carve|calib:|sticker|silhouette|pnp:|mean centre|FAILED|PASSED|BUILD|error:|Assertion|^e: " | head -100
       - name: Build release APK (debug-signed)
         run: gradle assembleRelease --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4

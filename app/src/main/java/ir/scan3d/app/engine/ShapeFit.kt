@@ -166,19 +166,39 @@ object ShapeFit {
     }
 
     /**
-     * Parametric mesh of the fitted shape (marching cubes on its SDF), for the clean STL. The body is
-     * generated untilted and resting flat on z = 0, which is what the physical object is.
+     * Exact mesh of the fitted shape for the clean STL: every vertex lies on the SDF zero set (found by
+     * bisection along rays from the base centre), so flat faces are flat and fillets are true arcs; no voxel
+     * staircase. The body is generated untilted and resting flat on z = 0, which is what the physical object is.
+     * @param stepDeg angular sampling of the dome (1.5 deg ~ 0.9 mm on a 35 mm object)
      */
-    fun mesh(p: Params, voxel: Double = 0.35): Mesh {
+    fun mesh(p: Params, stepDeg: Double = 1.5): Mesh {
         val q = p.copy(); q.tx = 0.0; q.ty = 0.0
-        val pad = 2.0
-        val half = hypot(q.w, q.l) / 2 + pad
-        val x0 = q.cx - half; val y0 = q.cy - half
-        val nx = ((2 * half) / voxel).toInt() + 1; val nz = ((q.h + pad) / voxel).toInt() + 2
-        val g = Carve.Grid(x0, y0, 0.0, nx, nx, nz, voxel)
-        for (i in 0 until nx) { val x = x0 + i * voxel
-            for (j in 0 until nx) { val y = y0 + j * voxel
-                for (k in 0 until nz) { val z = k * voxel; g.f[g.idx(i, j, k)] = (-sdf(q, x, y, z)).toFloat() } } }
-        return MarchingCubes.run(g).taubin(4)
+        val nAz = max(24, (360 / stepDeg).toInt()); val nEl = max(6, (90 / stepDeg).toInt())     // rings el = 0 (rim) .. 90 (pole)
+        val reach = hypot(q.w, q.l) / 2 + q.h + 2.0
+        val verts = ArrayList<Float>(3 * (nAz * nEl + 2)); val tris = ArrayList<Int>(6 * nAz * nEl)
+        fun add(x: Double, y: Double, z: Double): Int { verts.add(x.toFloat()); verts.add(y.toFloat()); verts.add(z.toFloat()); return verts.size / 3 - 1 }
+        // rings 0 .. nEl-1 (el = 0 .. just below 90), then the top pole
+        val ring = Array(nEl) { IntArray(nAz) }
+        for (r in 0 until nEl) {
+            val el = Math.toRadians(90.0 * r / nEl)
+            for (a in 0 until nAz) {
+                val az = 2 * Math.PI * a / nAz
+                val dx = cos(el) * cos(az); val dy = cos(el) * sin(az); val dz = sin(el)
+                var lo = 0.0; var hi = reach
+                for (it in 0 until 40) { val mid = (lo + hi) / 2; if (sdf(q, q.cx + mid * dx, q.cy + mid * dy, mid * dz) <= 0) lo = mid else hi = mid }
+                val t = (lo + hi) / 2
+                ring[r][a] = add(q.cx + t * dx, q.cy + t * dy, if (r == 0) 0.0 else t * dz)
+            }
+        }
+        val top = add(q.cx, q.cy, q.h); val bottom = add(q.cx, q.cy, 0.0)
+        for (r in 0 until nEl - 1) for (a in 0 until nAz) {
+            val b = (a + 1) % nAz
+            tris.add(ring[r][a]); tris.add(ring[r][b]); tris.add(ring[r + 1][a])
+            tris.add(ring[r][b]); tris.add(ring[r + 1][b]); tris.add(ring[r + 1][a])
+        }
+        for (a in 0 until nAz) { val b = (a + 1) % nAz; tris.add(ring[nEl - 1][a]); tris.add(ring[nEl - 1][b]); tris.add(top) }
+        for (a in 0 until nAz) { val b = (a + 1) % nAz; tris.add(ring[0][b]); tris.add(ring[0][a]); tris.add(bottom) }
+        val m = Mesh(verts.toFloatArray(), tris.toIntArray())
+        return if (m.volume() < 0) Mesh(m.verts, IntArray(m.tris.size) { val t = it / 3; val w = it % 3; m.tris[3 * t + intArrayOf(0, 2, 1)[w]] }) else m
     }
 }

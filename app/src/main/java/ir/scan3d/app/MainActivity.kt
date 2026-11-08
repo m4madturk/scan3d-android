@@ -353,13 +353,24 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private fun persist() { session?.let { s -> lifecycleScope.launch(Dispatchers.IO) { try { store.save(s) } catch (_: Exception) {} } } }
 
-    private fun requestBuild() {
+    private fun requestBuild(force: Boolean = false) {
         val s = session ?: return
         val done = s.shots.filter { it.state == "done" }
         if (mode == "calib") {
             val st = calib?.status()
             if (st == null || st.total < 15) { toast(getString(R.string.calib_more)); return }
         } else if (done.size < 8) { toast(getString(R.string.need_shots, fa(done.size))); return }
+        else if (!force) {
+            // no low-elevation shot at all: the side walls and the base come out bloated; say so before building
+            val lowBand = s.layout()?.bands?.firstOrNull()?.second ?: 35.0
+            val lows = done.count { (it.pose?.el ?: 90.0) < lowBand }
+            if (lows == 0) {
+                androidx.appcompat.app.AlertDialog.Builder(this).setMessage(getString(R.string.low_missing))
+                    .setPositiveButton(getString(R.string.low_missing_go), null)
+                    .setNegativeButton(getString(R.string.low_missing_anyway)) { _, _ -> requestBuild(force = true) }.show()
+                return
+            }
+        }
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
             notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)   // progress notification; the build runs either way
         store.save(s)

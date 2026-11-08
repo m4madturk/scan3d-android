@@ -41,6 +41,9 @@
     <string name="calib_count">%1$s عکس · افقی %2$s · پوشش کادر %3$s/%4$s</string>
     <string name="calib_no_board">صفحه‌ی کالیبراسیون کامل دیده نشد؛ این عکس شمرده نشد.</string>
     <string name="calib_added">ثبت شد: %1$s گوشه، شیب حدود %2$s درجه</string>
+    <string name="low_missing">از زاویه‌ی پایین (۱۰ تا ۳۵ درجه) هیچ عکسی نیست. بدون این عکس‌ها دیواره‌ها و لبه‌های گردِ جسم دقیق درنمی‌آیند و پایه‌ی مدل پُف می‌کند. پیشنهاد: حداقل ۴ عکس از پایین و از جهت‌های مختلف بگیرید.</string>
+    <string name="low_missing_go">عکس پایین می‌گیرم</string>
+    <string name="low_missing_anyway">همین‌طوری بساز</string>
     <string name="calib_more">هنوز کمه؛ حداقل ۱۵ عکس طبق راهنما لازمه.</string>
     <string name="profile_fmt">پروفایل لنز این گوشی: %1$s</string>
     <string name="no_profile">پروفایل لنز نداری؛ یک‌بار «کالیبراسیون» کن (اختیاری، دقت بالاتر).</string>

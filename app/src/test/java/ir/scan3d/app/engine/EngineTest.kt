@@ -254,8 +254,14 @@ class EngineTest {
         assertEquals(80.0, p.cx, 0.6); assertEquals(120.0, p.cy, 0.6)
         assertTrue("fit score %.2f".format(fit.within1mm), fit.within1mm > 0.75)
         // the clean mesh is flat, untilted and has the fitted size
-        val clean = ShapeFit.mesh(p, 0.5); val b = clean.bounds()
-        assertEquals(0.0, b[0][2], 1e-3); assertEquals(28.0, b[1][2], 0.5)
-        assertEquals(clean.volume(), ShapeFit.mesh(truth.copy().also { it.tx = 0.0; it.ty = 0.0 }, 0.5).volume(), 0.03 * clean.volume())
+        val clean = ShapeFit.mesh(p); val b = clean.bounds()
+        assertEquals(0.0, b[0][2], 1e-4); assertEquals(p.h, b[1][2], 1e-3)
+        val ideal = ShapeFit.mesh(truth.copy().also { it.tx = 0.0; it.ty = 0.0 })
+        println("clean mesh: ${clean.triangleCount} tris, volume %.1f cm3 (ideal %.1f)".format(clean.volume() / 1000, ideal.volume() / 1000))
+        assertEquals(ideal.volume(), clean.volume(), 0.03 * ideal.volume())
+        // every clean-mesh vertex lies on the fitted surface (exact tessellation, no voxel staircase)
+        var worst = 0.0
+        for (i in 0 until clean.vertexCount) worst = maxOf(worst, abs(ShapeFit.sdf(p.copy().also { it.tx = 0.0; it.ty = 0.0 }, clean.verts[3 * i].toDouble(), clean.verts[3 * i + 1].toDouble(), clean.verts[3 * i + 2].toDouble())))
+        assertTrue("vertex off the surface by %.3f mm".format(worst), worst < 0.01)
     }
 }
