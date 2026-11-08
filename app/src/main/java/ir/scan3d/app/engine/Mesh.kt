@@ -15,7 +15,28 @@ class Mesh(val verts: FloatArray, val tris: IntArray) {
      * Taubin smoothing (lambda/mu): removes the voxel staircase of marching cubes without shrinking the
      * model the way plain Laplacian smoothing does. Vertices on the base plane (z = minimum) stay put.
      */
+    /** Merges coincident vertices (marching cubes emits per-triangle vertices) so neighbourhoods are real. */
+    fun welded(): Mesh {
+        val map = HashMap<Long, Int>(vertexCount)
+        val remap = IntArray(vertexCount)
+        val nv = ArrayList<Float>(vertexCount * 3)
+        for (i in 0 until vertexCount) {
+            val x = Math.round(verts[3 * i] * 2000f).toLong(); val y = Math.round(verts[3 * i + 1] * 2000f).toLong(); val z = Math.round(verts[3 * i + 2] * 2000f).toLong()
+            val key = (x and 0x1FFFFF) or ((y and 0x1FFFFF) shl 21) or ((z and 0x1FFFFF) shl 42)
+            val id = map.getOrPut(key) { nv.add(verts[3 * i]); nv.add(verts[3 * i + 1]); nv.add(verts[3 * i + 2]); nv.size / 3 - 1 }
+            remap[i] = id
+        }
+        val nt = ArrayList<Int>(tris.size)
+        for (t in 0 until triangleCount) { val a = remap[tris[3 * t]]; val b = remap[tris[3 * t + 1]]; val c = remap[tris[3 * t + 2]]; if (a != b && b != c && a != c) { nt.add(a); nt.add(b); nt.add(c) } }
+        return Mesh(nv.toFloatArray(), nt.toIntArray())
+    }
+
     fun taubin(iterations: Int = 10, lambda: Float = 0.5f, mu: Float = -0.53f): Mesh {
+        val welded = welded()
+        return welded.taubinWelded(iterations, lambda, mu)
+    }
+
+    private fun taubinWelded(iterations: Int, lambda: Float, mu: Float): Mesh {
         val n = vertexCount
         val adj = Array(n) { IntArray(0) }
         run {
