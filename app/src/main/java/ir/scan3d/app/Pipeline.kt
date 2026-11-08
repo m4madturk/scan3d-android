@@ -30,7 +30,7 @@ object Pipeline {
     class Report(val sizeMm: DoubleArray, val volumeCm3: Double, val views: Int, val planes: Int, val sigma0: Double,
                  val stickers: Int, val frameworkFrames: Int, val warnings: List<String>, val seconds: Double, val triangles: Int)
 
-    private const val SIL_MAX = 1000     // silhouettes are computed on a downscaled copy (speed; accuracy limited by the hull anyway)
+    private const val SIL_MAX = 1200     // silhouettes are computed on a downscaled copy (speed; accuracy limited by the hull anyway)
     private const val TPL_PX_PER_MM = 4.0
 
     /** The printed board as a byte image (0 = black), from the same OpenCV board definition. */
@@ -102,7 +102,7 @@ object Pipeline {
             }
             val area = r.area.toDouble() / (sw * sh)
             if (tot >= 3 && inside < 0.6 * tot) { dropped++; log("shot ${shots[ui].n}: silhouette misses the stickers ($inside/$tot inside, area %.1f%%); dropped".format(100 * area)); continue }
-            log("shot ${shots[ui].n}: silhouette solidity %.2f, stickers inside $inside/$tot, area %.1f%%".format(r.solidity, 100 * area))
+            log("shot ${shots[ui].n}: board verified %.0f%%, object/unknown area %.1f%% of image, stickers inside $inside/$tot".format(100 * r.solidity, 100 * area))
             views.add(SilView(sw, sh, r.mask, camS, pose))
         }
         if (dropped > 0) log("$dropped silhouette(s) dropped by the sticker check")
@@ -120,6 +120,7 @@ object Pipeline {
         val stZ = geo.stickers.filter { it.id !in onBoard }.map { -it.centre.z }
         log("stickers z-up range %.1f .. %.1f mm; carve tolerance $votes of ${views.size} views".format(stZ.minOrNull() ?: 0.0, stZ.maxOrNull() ?: 0.0))
         var coarse = Carve.carve(views, boardBounds, 2.0, 0.5, planes, votes)
+        Carve.removeSkirt(coarse, 4.5)                     // plain squares at z~0 are "unknown" in every view: ignore them for the bounds
         var b = Carve.insideBounds(coarse, 4.0)
         if (b == null) {
             val fr = Carve.insideFractions(views, boardBounds, 8.0)
@@ -127,6 +128,7 @@ object Pipeline {
             votes = max(2, Math.round(0.25 * views.size).toInt())
             log("empty intersection; retrying with tolerance $votes")
             coarse = Carve.carve(views, boardBounds, 2.0, 0.5, planes, votes)
+            Carve.removeSkirt(coarse, 4.5)
             b = Carve.insideBounds(coarse, 4.0)
         }
         if (b == null) throw IllegalStateException("object not found inside the silhouettes (see log: silhouettes do not intersect)")
@@ -154,6 +156,8 @@ object Pipeline {
         val swap = rot == 90 || rot == 270
         val dw = if (swap) h else w; val dh = if (swap) w else h          // size of the stored (unrotated) image we need
         val o = BitmapFactory.Options(); o.inJustDecodeBounds = true; BitmapFactory.decodeFile(f.absolutePath, o)
+        if (o.outWidth <= 0) return null
+        if ((o.outWidth > o.outHeight) != (dw > dh)) return loadGray(f, w, h, 0)   // stored orientation disagrees with rot: trust the pixels
         var sample = 1; while (o.outWidth / (sample * 2) >= dw && o.outHeight / (sample * 2) >= dh) sample *= 2
         val o2 = BitmapFactory.Options(); o2.inSampleSize = sample; o2.inPreferredConfig = Bitmap.Config.ARGB_8888
         val bm = BitmapFactory.decodeFile(f.absolutePath, o2) ?: return null

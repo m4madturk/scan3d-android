@@ -41,6 +41,83 @@ class EngineTest {
         return out
     }
 
+    /** A synthetic ChArUco-like template: 7x10 squares of 25 mm at 4 px/mm, random 6x6 "bits" in every black square. */
+    private fun fakeTemplate(): Silhouette.BoardTemplate {
+        val ppm = 4.0; val w = 700; val h = 1000; val img = ByteArray(w * h)
+        val rnd = java.util.Random(3)
+        val bits = Array(70) { IntArray(36) { if (rnd.nextBoolean()) 1 else 0 } }
+        for (y in 0 until h) for (x in 0 until w) {
+            val sx = x / 100; val sy = y / 100
+            val black = (sx + sy) % 2 == 0
+            var v = if (black) 0 else 255
+            if (black) { val lx = x - sx * 100; val ly = y - sy * 100
+                if (lx in 14..85 && ly in 14..85) { val bx = (lx - 14) / 12; val by = (ly - 14) / 12; if (bits[sy * 7 + sx][by * 6 + bx] == 1) v = 255 } }
+            img[y * w + x] = v.toByte()
+        }
+        return Silhouette.BoardTemplate(img, w, h, ppm)
+    }
+
+    @Test
+    fun silhouetteSeparatesWhiteObjectFromWhiteSquares() {
+        val tpl = fakeTemplate()
+        val cam = Camera(1000.0, 500.0, 375.0, 0.02, 0.0)
+        val W = 1000; val H = 750
+        // camera 350 mm from the board centre, 55 degrees elevation, looking at the centre
+        val az = Math.toRadians(200.0); val el = Math.toRadians(55.0); val dist = 350.0
+        val aim = Vec3(87.5, 125.0, 0.0)
+        val c = Vec3(aim.x + dist * Math.sin(az) * Math.cos(el), aim.y - dist * Math.cos(az) * Math.cos(el), -dist * Math.sin(el))
+        val f = (aim - c).unit(); val up = Vec3(0.0, 0.0, -1.0)
+        val r = f.cross(up).unit(); val d = f.cross(r)
+        val R = arrayOf(doubleArrayOf(r.x, r.y, r.z), doubleArrayOf(d.x, d.y, d.z), doubleArrayOf(f.x, f.y, f.z))
+        val t = Vec3(-(R[0][0] * c.x + R[0][1] * c.y + R[0][2] * c.z), -(R[1][0] * c.x + R[1][1] * c.y + R[1][2] * c.z), -(R[2][0] * c.x + R[2][1] * c.y + R[2][2] * c.z))
+        val pose = Pose6(Rot.toVec(R), t.toArray())
+        // render the "photo": board through the camera (same ray-plane model), lighting gradient, noise,
+        // a white box object 50x40x20 mm at the board centre with a soft shadow, and carpet outside the board
+        val photo = ByteArray(W * H); val truthObj = BooleanArray(W * H)
+        val Rm = pose.R(); val C = pose.centre(); val rnd = java.util.Random(11)
+        val box = doubleArrayOf(62.5, 112.5, 105.0, 137.5)   // x0 y0 x1 y1 on the board (base of the box)
+        for (v in 0 until H) for (u in 0 until W) {
+            val n = cam.undistort(u.toDouble(), v.toDouble())
+            val dx = Rm[0][0] * n[0] + Rm[1][0] * n[1] + Rm[2][0]; val dy = Rm[0][1] * n[0] + Rm[1][1] * n[1] + Rm[2][1]; val dz = Rm[0][2] * n[0] + Rm[1][2] * n[1] + Rm[2][2]
+            var g = 120 + (u % 37) / 6                                     // carpet-ish texture
+            if (dz != 0.0) {
+                // top face of the box at z = -20 (above the board), then the board plane
+                val s20 = (-20.0 - C.z) / dz
+                if (s20 > 0) { val X = C.x + s20 * dx; val Y = C.y + s20 * dy
+                    if (X in box[0]..box[2] && Y in box[1]..box[3]) { g = 228 + ((X - box[0]) / 42.5 * 12).toInt(); truthObj[v * W + u] = true } }
+                if (!truthObj[v * W + u]) {
+                    val s0 = -C.z / dz
+                    if (s0 > 0) { val X = C.x + s0 * dx; val Y = C.y + s0 * dy
+                        // box side faces: the ray hits a vertical face when the ground point is inside the footprint extended... keep it simple: footprint = object
+                        if (X in box[0]..box[2] && Y in box[1]..box[3]) { g = 205; truthObj[v * W + u] = true }
+                        else { val tx = (X * tpl.pxPerMm).toInt(); val ty = (Y * tpl.pxPerMm).toInt()
+                            if (tx in 0 until tpl.w && ty in 0 until tpl.h) {
+                                val printed = tpl.img[ty * tpl.w + tx].toInt() and 255
+                                val light = 0.7 + 0.5 * (X / 175.0)                       // one side of the room brighter
+                                var shade = 1.0
+                                if (X in box[2]..(box[2] + 15) && Y in (box[1] - 5)..(box[3] + 5)) shade = 0.55   // soft shadow next to the box
+                                g = (40 + printed * 0.75 * light * shade).toInt().coerceIn(0, 255)
+                            } } } }
+            }
+            photo[v * W + u] = (g + rnd.nextGaussian() * 3).toInt().coerceIn(0, 255).toByte()
+        }
+        val res = Silhouette.extract(photo, W, H, cam, pose, tpl)!!
+        var objInside = 0; var objN = 0; var boardInside = 0; var boardN = 0
+        for (i in 0 until W * H) {
+            // only judge pixels on the board (valid) : object truth vs board truth
+            val n = cam.undistort((i % W).toDouble(), (i / W).toDouble())
+            val dx = Rm[0][0] * n[0] + Rm[1][0] * n[1] + Rm[2][0]; val dy = Rm[0][1] * n[0] + Rm[1][1] * n[1] + Rm[2][1]; val dz = Rm[0][2] * n[0] + Rm[1][2] * n[1] + Rm[2][2]
+            val s0 = -C.z / dz; if (s0 <= 0) continue
+            val X = C.x + s0 * dx; val Y = C.y + s0 * dy
+            if (X < 5 || Y < 5 || X > 170 || Y > 245) continue
+            if (truthObj[i]) { objN++; if (res.mask[i]) objInside++ } else { boardN++; if (res.mask[i]) boardInside++ }
+        }
+        println("silhouette: board verified %.1f%%; object kept %.1f%%; board wrongly inside %.1f%%".format(100 * res.solidity, 100.0 * objInside / objN, 100.0 * boardInside / boardN))
+        assertTrue("object must stay inside", objInside > 0.93 * objN)
+        assertTrue("most of the board must be verified (carvable)", boardInside < 0.45 * boardN)
+        assertTrue(res.solidity > 0.5)
+    }
+
     @Test
     fun planarPnpSurvivesNoiseAndRoughCamera() {
         // real photos: ~1.5 px corner noise, and a camera guess that is 15 % off; every frame must still get a pose

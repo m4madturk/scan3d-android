@@ -3,6 +3,7 @@ package ir.scan3d.app.engine
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sqrt
 
 /**
  * Object silhouette by comparing the photo with the printed board as the solved camera would see
@@ -17,14 +18,24 @@ object Silhouette {
     /** boardImage: the printed board as a gray byte image at pxPerMm resolution (0 = black). */
     class BoardTemplate(val img: ByteArray, val w: Int, val h: Int, val pxPerMm: Double)
 
+    /**
+     * Three-state classification against the rendered board:
+     *  - SURE BOARD: the local structure of the board (square edges, marker bits) is observed where the
+     *    render predicts it (normalised cross-correlation over a window of ~half a square). This is
+     *    invariant to shading and shadows, and it does not need black/white level estimates.
+     *  - OBJECT: strong level mismatch with the local black/white levels (dark object on white, white on black).
+     *  - UNKNOWN: plain square interiors and everything outside the board (a white object on a white square
+     *    looks like the square). Unknown counts as "inside" for carving: other views decide.
+     * The returned mask is "inside or unknown" = NOT sure board; the visual hull intersection does the rest.
+     */
     fun extract(gray: ByteArray, w: Int, h: Int, cam: Camera, pose: Pose6, tpl: BoardTemplate, thresh: Int = 55, aiMask: BooleanArray? = null): Result? {
         val R = pose.R(); val t = pose.t
         val C = pose.centre()
         // expected board image and validity, per pixel, via the ray-plane intersection
         val expected = ByteArray(w * h); val valid = BooleanArray(w * h)
+        var sqPx = 0.0; var sqN = 0
         for (v in 0 until h) for (u in 0 until w) {
             val n = cam.undistort(u.toDouble(), v.toDouble())
-            // ray direction in world: R^T [xn, yn, 1]
             val dx = R[0][0] * n[0] + R[1][0] * n[1] + R[2][0]; val dy = R[0][1] * n[0] + R[1][1] * n[1] + R[2][1]; val dz = R[0][2] * n[0] + R[1][2] * n[1] + R[2][2]
             if (dz == 0.0) continue
             val s = -C.z / dz
@@ -34,49 +45,88 @@ object Silhouette {
             if (tx < 0 || ty < 0 || tx >= tpl.w || ty >= tpl.h) continue
             expected[v * w + u] = tpl.img[ty * tpl.w + tx]; valid[v * w + u] = true
         }
-        // erode validity so the paper edge is not flagged
         val valid2 = erode(valid, w, h, 4)
-        // photographed levels of printed black and white: LOCAL medians on a coarse grid, so a window on one
-        // side of the room (brighter squares there) does not get flagged as object; global medians as fallback
+        var nValid = 0; for (b in valid2) if (b) nValid++
+        if (nValid < 2000) return null
+        // projected size of one 25 mm square (px): from the camera distance and focal length
+        val dist = sqrt(C.x * C.x + C.y * C.y + C.z * C.z).coerceAtLeast(50.0)
+        val squarePx = 25.0 * cam.f / dist
+        val win = max(9, (0.5 * squarePx).toInt()) or 1
+        val r = win / 2
+
+        // ---- structure test: NCC between the photo and the (slightly blurred) render ----
+        val e = FloatArray(w * h) { (expected[it].toInt() and 255).toFloat() }
+        val g = FloatArray(w * h) { (gray[it].toInt() and 255).toFloat() }
+        val eb = boxMean(e, w, h, 1)                        // mimic the camera blur on the render
+        val me = boxMean(eb, w, h, r); val mg = boxMean(g, w, h, r)
+        val ee = boxMean(FloatArray(w * h) { eb[it] * eb[it] }, w, h, r)
+        val gg = boxMean(FloatArray(w * h) { g[it] * g[it] }, w, h, r)
+        val eg = boxMean(FloatArray(w * h) { eb[it] * g[it] }, w, h, r)
+        var sure = BooleanArray(w * h)
+        for (i in 0 until w * h) {
+            if (!valid2[i]) continue
+            val ve = ee[i] - me[i] * me[i]; val vg = gg[i] - mg[i] * mg[i]
+            if (ve < 30f * 30f) continue                        // no board structure in this window: unknown
+            val ncc = (eg[i] - me[i] * mg[i]) / sqrt(max(ve, 1e-3f) * max(vg, 1e-3f))
+            if (ncc > 0.5f) sure[i] = true
+        }
+        // a window that straddles the object edge fails although its centre may still be board: tighten
+        sure = dilate(sure, w, h, max(1, (0.1 * win).toInt()))
+
+        // ---- level test for the parts the structure cannot judge (object over a plain square) ----
         val blacks = ArrayList<Int>(); val whites = ArrayList<Int>()
-        for (i in 0 until w * h step 7) if (valid2[i]) { val e = expected[i].toInt() and 255; val g = gray[i].toInt() and 255; if (e < 128) blacks.add(g) else whites.add(g) }
-        if (blacks.size < 50 || whites.size < 50) return null
-        val gLo = median(blacks); val gHi = median(whites)
-        val cells = 6; val cw = (w + cells - 1) / cells; val ch = (h + cells - 1) / cells
-        val cellLo = IntArray(cells * cells) { gLo }; val cellHi = IntArray(cells * cells) { gHi }
-        run {
+        for (i in 0 until w * h step 7) if (valid2[i]) { val ev = expected[i].toInt() and 255; val gv = gray[i].toInt() and 255; if (ev < 128) blacks.add(gv) else whites.add(gv) }
+        if (blacks.size >= 50 && whites.size >= 50) {
+            val gLo = median(blacks); val gHi = median(whites)
+            val cells = 6; val cw = (w + cells - 1) / cells; val ch = (h + cells - 1) / cells
+            val cellLo = IntArray(cells * cells) { gLo }; val cellHi = IntArray(cells * cells) { gHi }
             val cb = Array(cells * cells) { ArrayList<Int>() }; val cwh = Array(cells * cells) { ArrayList<Int>() }
-            for (v in 0 until h step 3) for (u in 0 until w step 3) { val i = v * w + u; if (!valid2[i]) continue
-                val e = expected[i].toInt() and 255; val g = gray[i].toInt() and 255; val c = (v / ch) * cells + (u / cw)
-                if (e < 128) cb[c].add(g) else cwh[c].add(g) }
+            for (v in 0 until h step 3) for (u in 0 until w step 3) { val i = v * w + u; if (!valid2[i] || !sure[i]) continue
+                val ev = expected[i].toInt() and 255; val gv = gray[i].toInt() and 255; val c = (v / ch) * cells + (u / cw)
+                if (ev < 128) cb[c].add(gv) else cwh[c].add(gv) }
             for (c in 0 until cells * cells) { if (cb[c].size >= 40) cellLo[c] = median(cb[c]); if (cwh[c].size >= 40) cellHi[c] = median(cwh[c]) }
-            // cells without enough samples borrow from the nearest filled neighbour (one pass is enough at this size)
             for (c in 0 until cells * cells) if (cb[c].size < 40 || cwh[c].size < 40) {
                 var best = -1; var bd = Int.MAX_VALUE
                 for (d in 0 until cells * cells) if (cb[d].size >= 40 && cwh[d].size >= 40) { val dd = abs(d / cells - c / cells) + abs(d % cells - c % cells); if (dd < bd) { bd = dd; best = d } }
                 if (best >= 0) { cellLo[c] = cellLo[best]; cellHi[c] = cellHi[best] }
             }
+            val pred = IntArray(w * h); val thr = IntArray(w * h)
+            for (v in 0 until h) for (u in 0 until w) { val c = (v / ch) * cells + (u / cw); val lo = cellLo[c]; val hi = cellHi[c]
+                pred[v * w + u] = lo + ((hi - lo) * ((expected[v * w + u].toInt() and 255) / 255.0)).toInt()
+                thr[v * w + u] = max(22, min(thresh, (0.33 * (hi - lo)).toInt())) }
+            for (v in 0 until h) for (u in 0 until w) {
+                val i = v * w + u; if (!valid2[i] || !sure[i]) continue
+                var mn = Int.MAX_VALUE; var mx = Int.MIN_VALUE
+                for (dv in -3..3) { val vv = v + dv; if (vv < 0 || vv >= h) continue; for (du in -3..3) { val uu = u + du; if (uu < 0 || uu >= w) continue; val p = pred[vv * w + uu]; if (p < mn) mn = p; if (p > mx) mx = p } }
+                val gv = gray[i].toInt() and 255
+                if (gv > mx + thr[i] || gv < mn - thr[i]) sure[i] = false            // strong mismatch: object, never board
+            }
         }
-        // predicted level per pixel from its cell, with +-3 px tolerance to misregistration; threshold relative to the local contrast
-        val pred = IntArray(w * h); val thr = IntArray(w * h)
-        for (v in 0 until h) for (u in 0 until w) { val c = (v / ch) * cells + (u / cw); val lo = cellLo[c]; val hi = cellHi[c]
-            pred[v * w + u] = lo + ((hi - lo) * ((expected[v * w + u].toInt() and 255) / 255.0)).toInt()
-            thr[v * w + u] = max(22, min(thresh, (0.33 * (hi - lo)).toInt())) }
-        val predLo = IntArray(w * h); val predHi = IntArray(w * h)
-        for (v in 0 until h) for (u in 0 until w) {
-            var mn = Int.MAX_VALUE; var mx = Int.MIN_VALUE
-            for (dv in -3..3) { val vv = v + dv; if (vv < 0 || vv >= h) continue; for (du in -3..3) { val uu = u + du; if (uu < 0 || uu >= w) continue; val p = pred[vv * w + uu]; if (p < mn) mn = p; if (p > mx) mx = p } }
-            predLo[v * w + u] = mn; predHi[v * w + u] = mx
+        if (aiMask != null) { val dil = dilate(aiMask, w, h, 2); for (i in sure.indices) if (!dil[i] && valid2[i]) sure[i] = true }   // outside the AI mask is board
+        val inside = BooleanArray(w * h) { !sure[it] }
+        var nSure = 0; for (b in sure) if (b) nSure++
+        var area = 0; for (i in 0 until w * h) if (valid2[i] && inside[i]) area++
+        return Result(inside, nSure.toDouble() / nValid, area)
+    }
+
+    /** Separable box mean with radius r (window 2r+1), zero-padded at the borders by replication. */
+    fun boxMean(src: FloatArray, w: Int, h: Int, r: Int): FloatArray {
+        val tmp = FloatArray(w * h); val out = FloatArray(w * h)
+        val n = (2 * r + 1).toFloat()
+        for (v in 0 until h) {
+            val row = v * w
+            var acc = 0f
+            for (u in -r..r) acc += src[row + u.coerceIn(0, w - 1)]
+            tmp[row] = acc / n
+            for (u in 1 until w) { acc += src[row + (u + r).coerceIn(0, w - 1)] - src[row + (u - r - 1).coerceIn(0, w - 1)]; tmp[row + u] = acc / n }
         }
-        var raw = BooleanArray(w * h) { i -> valid2[i] && run { val g = gray[i].toInt() and 255; g > predHi[i] + thr[i] || g < predLo[i] - thr[i] } }
-        raw = open(raw, w, h, 2)
-        var closed = close(raw, w, h, max(5, (0.02 * min(w, h)).toInt()))
-        if (aiMask != null) { val dil = dilate(aiMask, w, h, 2); for (i in closed.indices) closed[i] = closed[i] && dil[i] }
-        val comp = largestComponent(closed, w, h) ?: return null
-        val filled = fillHoles(comp, w, h)
-        val area = filled.count { it }
-        val hullArea = convexHullArea(filled, w, h)
-        return Result(filled, if (hullArea > 0) area / hullArea else 0.0, area)
+        for (u in 0 until w) {
+            var acc = 0f
+            for (v in -r..r) acc += tmp[v.coerceIn(0, h - 1) * w + u]
+            out[u] = acc / n
+            for (v in 1 until h) { acc += tmp[(v + r).coerceIn(0, h - 1) * w + u] - tmp[(v - r - 1).coerceIn(0, h - 1) * w + u]; out[v * w + u] = acc / n }
+        }
+        return out
     }
 
     private fun median(a: List<Int>): Int { val s = a.sorted(); return s[s.size / 2] }

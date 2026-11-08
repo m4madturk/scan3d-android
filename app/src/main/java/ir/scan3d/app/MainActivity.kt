@@ -258,7 +258,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 // CameraX writes the sensor-frame JPEG with an EXIF orientation tag: read it, keep the sensor frame
                 val exif = ExifInterface(file.absolutePath)
                 shot.orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, 1)
-                val raw = Imgcodecs.imread(file.absolutePath, Imgcodecs.IMREAD_GRAYSCALE)
+                // IMREAD_IGNORE_ORIENTATION: OpenCV would otherwise apply the EXIF rotation, while the silhouette
+                // loader (BitmapFactory) does not -> detections and silhouettes in different frames (the slab bug)
+                val raw = Imgcodecs.imread(file.absolutePath, Imgcodecs.IMREAD_GRAYSCALE or Imgcodecs.IMREAD_IGNORE_ORIENTATION)
                 val gray = toSensorFrame(raw, shot)
                 shot.w = gray.cols(); shot.h = gray.rows()
                 val a = Detector.analyze(gray, cam.focalPx?.let { it * gray.cols() / (cam.sensorSize?.width ?: gray.cols()) })
@@ -295,8 +297,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private fun toSensorFrame(raw: Mat, shot: Shot): Mat {
         val prefs = getSharedPreferences("scan3d", MODE_PRIVATE)
         val portraitBuf = raw.rows() > raw.cols()
-        if (portraitBuf && !prefs.getBoolean("hal_rotates", false)) prefs.edit().putBoolean("hal_rotates", true).apply()
-        val halRotates = portraitBuf || prefs.getBoolean("hal_rotates", false)
+        if (portraitBuf && !prefs.getBoolean("hal_rotates_v2", false)) prefs.edit().putBoolean("hal_rotates_v2", true).apply()
+        val halRotates = portraitBuf || prefs.getBoolean("hal_rotates_v2", false)
         var rot = 0
         if (halRotates) {
             val r = shot.devRoll
