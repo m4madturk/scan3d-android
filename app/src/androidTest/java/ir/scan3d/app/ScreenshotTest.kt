@@ -100,13 +100,18 @@ class ScreenshotTest {
 
     @Test fun resultDone() {
         val dir = scanSession("s_done", false, 14)
-        val mesh = boxMesh(51.4f, 51.2f, 27.0f)
+        // a tilted rounded box as the "scan", run through the real fitter so the clean section shows real numbers
+        val truth = ir.scan3d.app.engine.ShapeFit.Params(0.0, 0.0, Math.toRadians(12.0), 66.0, 58.0, 27.0, 10.0, 5.0, Math.toRadians(2.5), Math.toRadians(-1.0))
+        val mesh = ir.scan3d.app.engine.ShapeFit.mesh(truth.copy().also { it.tx = 0.0; it.ty = 0.0 }, 0.6)
         mesh.writeStl(File(dir, "model.stl"))
         Preview.render(mesh, File(dir, "preview.png"))
-        val j = JSONObject().put("state", "done").put("size_mm", JSONArray(listOf(51.4, 51.2, 27.0))).put("volume_cm3", 69.7)
-            .put("views_used", 14).put("marker_planes", 7).put("stickers", 7).put("sigma0_px", 0.31).put("framework_frames", 14)
-            .put("triangles", 62284).put("seconds", 148.0).put("message", "14 views, 148 s")
-            .put("warnings", JSONArray(listOf("only 2 rolled photos; focal length and principal point weakly separated")))
+        val fit = ir.scan3d.app.engine.ShapeFit.fit(mesh)!!
+        val clean = ir.scan3d.app.engine.ShapeFit.mesh(fit.params, 0.6)
+        clean.writeStl(File(dir, "model_clean.stl")); Preview.render(clean, File(dir, "preview_clean.png"))
+        val rep = Pipeline.Report(doubleArrayOf(66.4, 58.3, 27.0), 97.2, 14, 7, 0.31, 7, 14,
+            listOf("only 2 rolled photos; focal length and principal point weakly separated"), 148.0, mesh.triangleCount, fit)
+        val j = Pipeline.reportJson(rep).put("state", "done").put("message", "14 views, 148 s")
+        j.getJSONObject("fit").put("tilt_deg", 2.7)        // as a bent sheet would show
         File(dir, "result.json").writeText(j.toString())
         ActivityScenario.launch<ResultActivity>(Intent(ctx, ResultActivity::class.java).putExtra("sid", "s_done")).use {
             Thread.sleep(1500)

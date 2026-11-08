@@ -70,15 +70,20 @@ class BuildService : Service() {
                     val files = shots.map { File(dir, "shot${it.n}.jpg") }
                     val seg = Segmenter(this@BuildService)
                     log(if (seg.available) "AI segmentation model loaded (u2netp)" else "AI segmentation model not available")
-                    val (mesh, rep) = Pipeline.build(shots, files, convex, prior, 0.4, { msg, p ->
+                    val out = Pipeline.build(shots, files, convex, prior, 0.4, { msg, p ->
                         write(resultFile, JSONObject().put("state", "processing").put("progress", p).put("message", msg))
                         nm().notify(1, notif(msg, (p * 100).toInt()))
                     }, ::log, seg)
                     seg.close()
+                    val mesh = out.mesh; val rep = out.report
                     mesh.writeStl(File(dir, "model.stl"))
                     Preview.render(mesh, File(dir, "preview.png"))
+                    val cleanStl = File(dir, "model_clean.stl"); val cleanPng = File(dir, "preview_clean.png")
+                    cleanStl.delete(); cleanPng.delete()
+                    out.clean?.let { c -> c.writeStl(cleanStl); Preview.render(c, cleanPng) }
                     val j = Pipeline.reportJson(rep).put("state", "done").put("stl", File(dir, "model.stl").absolutePath).put("preview", File(dir, "preview.png").absolutePath)
                         .put("message", "%d views, %.0f s".format(rep.views, rep.seconds))
+                    if (out.clean != null) j.put("stl_clean", cleanStl.absolutePath).put("preview_clean", cleanPng.absolutePath)
                     write(resultFile, j)
                 }
             } catch (e: Throwable) {

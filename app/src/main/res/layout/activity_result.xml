@@ -13,10 +13,22 @@
     <ProgressBar android:id="@+id/progress" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:paddingTop="4dp" />
     <TextView android:id="@+id/hint" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#93A29B" android:textSize="12sp" android:text="@string/bg_hint" />
 
-    <ImageView android:id="@+id/preview" android:layout_width="match_parent" android:layout_height="wrap_content" android:adjustViewBounds="true" android:paddingTop="10dp" android:contentDescription="@string/result" />
+    <!-- clean parametric model (shown when the hull fits a rounded box) -->
+    <LinearLayout android:id="@+id/cleanBox" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone"
+        android:layout_marginTop="12dp" android:padding="12dp" android:background="#17201D">
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/clean_title" android:textColor="#3BC2B9" android:textSize="15sp" android:textStyle="bold" />
+        <ImageView android:id="@+id/previewClean" android:layout_width="match_parent" android:layout_height="wrap_content" android:adjustViewBounds="true" android:paddingTop="8dp" android:contentDescription="@string/clean_title" />
+        <TextView android:id="@+id/cleanDims" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#E5ECE8" android:textSize="14sp" android:paddingTop="8dp" android:lineSpacingExtra="3dp" />
+        <TextView android:id="@+id/cleanWarn" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#E8B04A" android:textSize="13sp" android:paddingTop="6dp" android:lineSpacingExtra="2dp" android:visibility="gone" />
+        <Button android:id="@+id/btnShareClean" style="@style/Scan3D.Button" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="@string/share_clean" />
+    </LinearLayout>
+    <TextView android:id="@+id/cleanNone" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/clean_none" android:textColor="#E8B04A" android:textSize="13sp" android:paddingTop="10dp" android:visibility="gone" />
+
+    <TextView android:id="@+id/rawTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/raw_title" android:textColor="#93A29B" android:textSize="14sp" android:textStyle="bold" android:paddingTop="14dp" android:visibility="gone" />
+    <ImageView android:id="@+id/preview" android:layout_width="match_parent" android:layout_height="wrap_content" android:adjustViewBounds="true" android:paddingTop="6dp" android:contentDescription="@string/result" />
     <TextView android:id="@+id/info" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#93A29B" android:fontFamily="monospace" android:textDirection="ltr" android:gravity="start" android:textSize="12sp" android:paddingTop="10dp" android:lineSpacingExtra="2dp" />
 
-    <Button android:id="@+id/btnShare" style="@style/Scan3D.Button" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="@string/share_stl" android:enabled="false" />
+    <Button android:id="@+id/btnShare" style="@style/Scan3D.Button.Outlined" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="@string/share_stl" android:enabled="false" />
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
         <Button android:id="@+id/btnLog" style="@style/Scan3D.Button.Outlined" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/show_log" />
         <Button android:id="@+id/btnExport" style="@style/Scan3D.Button.Outlined" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/export_session" />

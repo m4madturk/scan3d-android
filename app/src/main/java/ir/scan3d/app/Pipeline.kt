@@ -29,7 +29,14 @@ import kotlin.math.min
 /** Everything from captured shots to an STL, entirely on the phone. */
 object Pipeline {
     class Report(val sizeMm: DoubleArray, val volumeCm3: Double, val views: Int, val planes: Int, val sigma0: Double,
-                 val stickers: Int, val frameworkFrames: Int, val warnings: List<String>, val seconds: Double, val triangles: Int)
+                 val stickers: Int, val frameworkFrames: Int, val warnings: List<String>, val seconds: Double, val triangles: Int,
+                 val fit: ShapeFit.Result? = null)
+
+    /** The scan hull, the clean parametric model (when the hull is box-like enough to fit one) and the numbers. */
+    class Output(val mesh: Mesh, val clean: Mesh?, val report: Report)
+
+    /** Below this fraction of the hull surface within 1 mm of the fitted box, the object is not a rounded box. */
+    const val FIT_MIN = 0.4
 
     private const val SIL_MAX = 1200     // silhouettes are computed on a downscaled copy (speed; accuracy limited by the hull anyway)
     private const val TPL_PX_PER_MM = 4.0
@@ -61,7 +68,7 @@ object Pipeline {
      * resting on z = 0, report).
      */
     fun build(shots: List<Shot>, files: List<File>, convex: Boolean, prior: CameraPrior?, voxel: Double,
-              progress: (String, Double) -> Unit, log: (String) -> Unit, segmenter: Segmenter? = null): Pair<Mesh, Report> {
+              progress: (String, Double) -> Unit, log: (String) -> Unit, segmenter: Segmenter? = null): Output {
         val t0 = System.currentTimeMillis()
         val done = shots.indices.filter { shots[it].state == "done" && shots[it].board != null }
         require(done.size >= 2) { "fewer than 2 shots with the board" }
@@ -173,12 +180,28 @@ object Pipeline {
         progress("ساخت مش…", 0.92)
         val mesh = MarchingCubes.run(g).taubin(12)        // take the voxel staircase off; volume preserved
         val bb = mesh.bounds()
-        val centred = mesh.translated((-(bb[0][0] + bb[1][0]) / 2).toFloat(), (-(bb[0][1] + bb[1][1]) / 2).toFloat(), (-bb[0][2]).toFloat())
+        val dx = (-(bb[0][0] + bb[1][0]) / 2).toFloat(); val dy = (-(bb[0][1] + bb[1][1]) / 2).toFloat(); val dz = (-bb[0][2]).toFloat()
+        val centred = mesh.translated(dx, dy, dz)
         val size = DoubleArray(3) { bb[1][it] - bb[0][it] }
-        val rep = Report(size, mesh.volume() / 1000, views.size, planes.size, geo.sigma0, geo.stickers.size, geo.frameworkFrames, geo.warnings,
-            (System.currentTimeMillis() - t0) / 1000.0, mesh.triangleCount)
+
+        // ---- clean parametric model: the rounded box that explains the hull ----
+        progress("برازش مدل تمیز…", 0.95)
+        val warnings = ArrayList(geo.warnings)
+        var clean: Mesh? = null
+        val fit = try { ShapeFit.fit(mesh) } catch (e: Exception) { log("shape fit failed: $e"); null }
+        if (fit != null) {
+            val p = fit.params
+            log("shape fit: %.2f x %.2f x %.2f mm, corner R %.1f, edge R %.1f, yaw %.1f deg, tilt %.1f deg; %.0f%% of the hull within 1 mm (rms %.2f, max %.1f, box outside hull %.2f)".format(
+                p.w, p.l, p.h, p.rc, p.rz, Math.toDegrees(p.theta), p.tiltDeg, 100 * fit.within1mm, fit.rms, fit.maxDev, fit.outside))
+            if (fit.within1mm >= FIT_MIN) {
+                clean = ShapeFit.mesh(p).translated(dx, dy, dz)           // same frame as the hull, flat on z = 0
+                if (p.tiltDeg > 1.5) warnings.add("object tilted %.1f deg relative to the board: the sheet under it is probably not flat".format(p.tiltDeg))
+            } else log("hull is not box-like (%.0f%% < %.0f%%): no clean model".format(100 * fit.within1mm, 100 * FIT_MIN))
+        } else log("shape fit: too little surface above the base")
+        val rep = Report(size, mesh.volume() / 1000, views.size, planes.size, geo.sigma0, geo.stickers.size, geo.frameworkFrames, warnings,
+            (System.currentTimeMillis() - t0) / 1000.0, mesh.triangleCount, if (clean != null) fit else null)
         progress("تمام", 1.0)
-        return centred to rep
+        return Output(centred, clean, rep)
     }
 
     /** Gray bytes of a JPEG, in SENSOR frame (EXIF ignored on purpose), downscaled to (w, h). */
@@ -205,8 +228,16 @@ object Pipeline {
         return out
     }
 
-    fun reportJson(r: Report): JSONObject = JSONObject()
-        .put("size_mm", org.json.JSONArray(r.sizeMm.toList())).put("volume_cm3", r.volumeCm3).put("views_used", r.views)
-        .put("marker_planes", r.planes).put("sigma0_px", r.sigma0).put("stickers", r.stickers).put("framework_frames", r.frameworkFrames)
-        .put("warnings", org.json.JSONArray(r.warnings)).put("seconds", r.seconds).put("triangles", r.triangles)
+    fun reportJson(r: Report): JSONObject {
+        val j = JSONObject()
+            .put("size_mm", org.json.JSONArray(r.sizeMm.toList())).put("volume_cm3", r.volumeCm3).put("views_used", r.views)
+            .put("marker_planes", r.planes).put("sigma0_px", r.sigma0).put("stickers", r.stickers).put("framework_frames", r.frameworkFrames)
+            .put("warnings", org.json.JSONArray(r.warnings)).put("seconds", r.seconds).put("triangles", r.triangles)
+        r.fit?.let { f ->
+            val p = f.params
+            j.put("fit", JSONObject().put("w", p.w).put("l", p.l).put("h", p.h).put("rc", p.rc).put("rz", p.rz)
+                .put("yaw_deg", Math.toDegrees(p.theta)).put("tilt_deg", p.tiltDeg).put("within1mm", f.within1mm).put("rms", f.rms).put("max", f.maxDev))
+        }
+        return j
+    }
 }

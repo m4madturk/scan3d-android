@@ -51,7 +51,14 @@
     <string name="done">آماده شد.</string>
     <string name="failed">انجام نشد:</string>
     <string name="bg_hint">پردازش کامل روی خود گوشی انجام می‌شه و اینترنت نمی‌خواد. می‌تونی از این صفحه بیرون بری؛ کار در پس‌زمینه ادامه داره و نتیجه در «جلسه‌ها» می‌مونه.</string>
-    <string name="share_stl">دریافت / اشتراک فایل STL</string>
+    <string name="share_stl">فایل STL اسکن خام</string>
+    <string name="share_clean">فایل STL مدل تمیز (قابل چاپ)</string>
+    <string name="clean_title">مدل تمیز (برازش جعبهٔ گردگوشه)</string>
+    <string name="clean_dims">ابعاد: %1$s × %2$s × %3$s میلی‌متر\nشعاع گوشه‌ها: %4$s میلی‌متر | شعاع لبهٔ بالا: %5$s میلی‌متر\nانطباق با اسکن: %6$s٪ سطح در فاصلهٔ کمتر از ۱ میلی‌متر</string>
+    <string name="clean_tilt">⚠ جسم %1$s درجه نسبت به صفحه کج بوده؛ احتمالاً کاغذ زیرش صاف نیست. صفحه را روی شیشه یا MDF صاف بچسبانید تا ارتفاع دقیق شود.</string>
+    <string name="clean_loose">⚠ فقط %1$s٪ از سطح اسکن با جعبهٔ گردگوشه منطبق است؛ این مدل تقریبی است. برای دقت بیشتر از زوایای پایین‌تر هم عکس بگیرید.</string>
+    <string name="clean_none">شکل این جسم شبیه جعبهٔ گردگوشه نبود؛ فقط مدل اسکن خام ساخته شد.</string>
+    <string name="raw_title">اسکن خام (هال بصری)</string>
     <string name="show_log">گزارش پردازش</string>
     <string name="sessions_hint">هر اسکن یا کالیبراسیون روی گوشی ذخیره می‌شه. روی هر مورد بزن تا ادامه بدی، نتیجه رو ببینی یا حذفش کنی.</string>
     <string name="sessions_empty">هنوز جلسه‌ای نیست.</string>

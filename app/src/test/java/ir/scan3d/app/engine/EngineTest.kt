@@ -225,4 +225,37 @@ class EngineTest {
         val fr = Carve.insideFractions(views2, b2, 4.0)
         assertEquals(0.0, fr.last(), 1e-9); assertTrue(fr[0] > 0.2)
     }
+
+    /**
+     * The clean-model fitter must recover a tilted rounded box from a hull that also carries the usual
+     * visual-hull base skirt (a wider, 6 mm tall slab under the object) and voxel noise.
+     */
+    @Test
+    fun shapeFitRecoversRoundedBoxDespiteBaseSkirt() {
+        val truth = ShapeFit.Params(80.0, 120.0, Math.toRadians(20.0), 66.0, 70.0, 28.0, 11.0, 6.0, Math.toRadians(3.0), Math.toRadians(-2.0))
+        val skirt = ShapeFit.Params(80.0, 120.0, Math.toRadians(20.0), 74.0, 78.0, 6.0, 11.0, 1.0)
+        val vox = 0.6
+        val g = Carve.Grid(30.0, 70.0, 0.0, (100 / vox).toInt(), (100 / vox).toInt(), (36 / vox).toInt(), vox)
+        val rnd = java.util.Random(7)
+        for (i in 0 until g.nx) for (j in 0 until g.ny) for (k in 0 until g.nz) {
+            val x = g.x0 + i * vox; val y = g.y0 + j * vox; val z = k * vox
+            val d = minOf(ShapeFit.sdf(truth, x, y, z), ShapeFit.sdf(skirt, x, y, z))       // union: object + skirt
+            g.f[g.idx(i, j, k)] = (-d + rnd.nextGaussian() * 0.1).toFloat()
+        }
+        val hull = MarchingCubes.run(g).taubin(6)
+        val t0 = System.currentTimeMillis()
+        val fit = ShapeFit.fit(hull)!!
+        val p = fit.params
+        println("shape fit took ${System.currentTimeMillis() - t0} ms: %.2f x %.2f x %.2f rc %.2f rz %.2f yaw %.1f tilt %.2f; within 1 mm %.0f%%, rms %.2f, outside %.2f".format(
+            p.w, p.l, p.h, p.rc, p.rz, Math.toDegrees(p.theta), p.tiltDeg, 100 * fit.within1mm, fit.rms, fit.outside))
+        assertEquals(70.0, p.w, 0.6); assertEquals(66.0, p.l, 0.6); assertEquals(28.0, p.h, 0.4)
+        assertEquals(11.0, p.rc, 1.2); assertEquals(6.0, p.rz, 1.2)
+        assertEquals(Math.toDegrees(Math.hypot(Math.toRadians(3.0), Math.toRadians(-2.0))), p.tiltDeg, 0.6)
+        assertEquals(80.0, p.cx, 0.6); assertEquals(120.0, p.cy, 0.6)
+        assertTrue("fit score %.2f".format(fit.within1mm), fit.within1mm > 0.75)
+        // the clean mesh is flat, untilted and has the fitted size
+        val clean = ShapeFit.mesh(p, 0.5); val b = clean.bounds()
+        assertEquals(0.0, b[0][2], 1e-3); assertEquals(28.0, b[1][2], 0.5)
+        assertEquals(clean.volume(), ShapeFit.mesh(truth.copy().also { it.tx = 0.0; it.ty = 0.0 }, 0.5).volume(), 0.03 * clean.volume())
+    }
 }

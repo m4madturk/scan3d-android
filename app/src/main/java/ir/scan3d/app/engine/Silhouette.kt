@@ -73,6 +73,7 @@ object Silhouette {
         }
         // small safety erosion: never eat into the object (other views carve what is too generous here)
         var sure = erode(passed, w, h, max(2, (0.06 * squarePx).toInt()))
+        val never = BooleanArray(w * h)                      // pixels proven to be object by the level test (AI may not override)
 
         // ---- level test for the parts the structure cannot judge (object over a plain square) ----
         val blacks = ArrayList<Int>(); val whites = ArrayList<Int>()
@@ -101,11 +102,12 @@ object Silhouette {
                 for (dv in -3..3) { val vv = v + dv; if (vv < 0 || vv >= h) continue; for (du in -3..3) { val uu = u + du; if (uu < 0 || uu >= w) continue; val p = pred[vv * w + uu]; if (p < mn) mn = p; if (p > mx) mx = p } }
                 val gv = gray[i].toInt() and 255
                 val c = (v / ch) * cells + (u / cw); val mid = (cellLo[c] + cellHi[c]) / 2
-                if (gv > mx + thr[i] || gv < mn - thr[i]) sure[i] = false            // strong mismatch: object, never board
+                if (gv > mx + thr[i] || gv < mn - thr[i]) { sure[i] = false; never[i] = true }   // strong mismatch: object, never board
                 else if (mx < mid && gv < mx + thr[i]) sure[i] = true                // dark expected, dark observed: exact board pixel
             }
         }
-        if (aiMask != null) { val dil = dilate(aiMask, w, h, 2); for (i in sure.indices) if (!dil[i] && valid2[i]) sure[i] = true }   // outside the AI mask is board
+        // outside the (slightly dilated) AI mask is board, except where the level test has proven object
+        if (aiMask != null) { val dil = dilate(aiMask, w, h, 2); for (i in sure.indices) if (!dil[i] && valid2[i] && !never[i]) sure[i] = true }
         val inside = BooleanArray(w * h) { !sure[it] }
         var nSure = 0; for (b in sure) if (b) nSure++
         var area = 0; for (i in 0 until w * h) if (valid2[i] && inside[i]) area++

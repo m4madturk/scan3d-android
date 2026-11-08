@@ -80,10 +80,38 @@ class ResultActivity : AppCompatActivity() {
         else b.preview.visibility = android.view.View.GONE
         val stl = File(dir, "model.stl")
         b.btnShare.isEnabled = st == "done" && stl.exists()
-        b.btnShare.setOnClickListener {
-            val out = File(getExternalFilesDir(null), "scan_$sid.stl"); stl.copyTo(out, overwrite = true)
-            val uri = FileProvider.getUriForFile(this, "$packageName.files", out)
-            startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("model/stl").putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "STL"))
+        b.btnShare.setOnClickListener { shareStl(stl, "scan_$sid.stl") }
+        showClean(d, dir, sid, st)
+    }
+
+    /** The clean parametric model: dimensions in Persian, its preview and its own STL. */
+    private fun showClean(d: JSONObject, dir: File, sid: String, st: String) {
+        val fit = d.optJSONObject("fit")
+        val cleanStl = File(dir, "model_clean.stl")
+        val isScan = !intent.getBooleanExtra("calib", false)
+        b.rawTitle.visibility = if (st == "done" && isScan) android.view.View.VISIBLE else android.view.View.GONE
+        if (st != "done" || !isScan || fit == null || !cleanStl.exists()) {
+            b.cleanBox.visibility = android.view.View.GONE
+            b.cleanNone.visibility = if (st == "done" && isScan && d.has("size_mm")) android.view.View.VISIBLE else android.view.View.GONE
+            return
         }
+        b.cleanNone.visibility = android.view.View.GONE
+        b.cleanBox.visibility = android.view.View.VISIBLE
+        fun f1(v: Double) = Ui.fa("%.1f".format(v))
+        b.cleanDims.text = getString(R.string.clean_dims, f1(fit.optDouble("w")), f1(fit.optDouble("l")), f1(fit.optDouble("h")),
+            f1(fit.optDouble("rc")), f1(fit.optDouble("rz")), Ui.fa("%.0f".format(100 * fit.optDouble("within1mm"))))
+        val warn = StringBuilder()
+        if (fit.optDouble("tilt_deg") > 1.5) warn.append(getString(R.string.clean_tilt, f1(fit.optDouble("tilt_deg")))).append("\n")
+        if (fit.optDouble("within1mm") < 0.7) warn.append(getString(R.string.clean_loose, Ui.fa("%.0f".format(100 * fit.optDouble("within1mm"))))).append("\n")
+        b.cleanWarn.text = warn.toString().trim(); b.cleanWarn.visibility = if (warn.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE
+        val png = File(dir, "preview_clean.png")
+        if (png.exists()) { b.previewClean.setImageBitmap(BitmapFactory.decodeFile(png.absolutePath)); b.previewClean.visibility = android.view.View.VISIBLE } else b.previewClean.visibility = android.view.View.GONE
+        b.btnShareClean.setOnClickListener { shareStl(cleanStl, "scan_${sid}_clean.stl") }
+    }
+
+    private fun shareStl(src: File, name: String) {
+        val out = File(getExternalFilesDir(null), name); src.copyTo(out, overwrite = true)
+        val uri = FileProvider.getUriForFile(this, "$packageName.files", out)
+        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("model/stl").putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "STL"))
     }
 }
