@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import ir.scan3d.app.engine.Camera
 import ir.scan3d.app.engine.CameraPrior
 import ir.scan3d.app.engine.Carve
+import ir.scan3d.app.engine.ShapeFit
 import ir.scan3d.app.engine.FrameObs
 import ir.scan3d.app.engine.MarchingCubes
 import ir.scan3d.app.engine.Mesh

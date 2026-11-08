@@ -48,5 +48,6 @@ object Ui {
     }
 
     /** Persian digits for user-facing numbers. */
-    fun fa(n: Number): String = n.toString().map { ch -> if (ch.isDigit()) ('۰' + (ch - '0')) else ch }.joinToString("")
+    fun fa(n: Number): String = fa(n.toString())
+    fun fa(s: String): String = s.map { ch -> if (ch.isDigit()) ('۰' + (ch - '0')) else ch }.joinToString("")
 }
