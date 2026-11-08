@@ -6,7 +6,7 @@
     <string name="need_camera">بدون دسترسی به دوربین کار نمی‌کنه.</string>
     <string name="ready">دوربین آماده‌ست. صفحه‌ی ChArUco رو توی کادر بیار.</string>
     <string name="starting">در حال راه‌اندازی…</string>
-    <string name="live_fmt">مارکر %1$s · صفحه %2$s · %3$s</string>
+    <string name="live_fmt">%3$s مارکر %1$s | گوشه‌ی صفحه %2$s</string>
     <string name="locked_auto">نوردهی و فوکوس قفل شد. از این به بعد فوکوس عوض نمی‌شه.</string>
     <string name="capturing">در حال عکس‌برداری…</string>
     <string name="shot_done">عکس %1$s ثبت شد: %2$s مارکر، %3$s گوشه‌ی صفحه (%4$s ms)</string>
@@ -68,7 +68,7 @@
     <string name="s_delete_q">این جلسه با همه‌ی عکس‌هاش حذف شود؟</string>
     <string name="export_session">خروجی جلسه (zip)</string>
     <string name="help">؟</string>
-    <string name="live_pose_fmt">مارکر %1$s · ساعت %2$s · %3$s° · %4$s cm · %5$s</string>
+    <string name="live_pose_fmt">%5$s مارکر %1$s | ساعت %2$s | ارتفاع %3$s درجه | فاصله %4$s سانت</string>
     <string name="hint_no_board">صفحه‌ی ChArUco رو کامل توی کادر بیار تا موقعیت گوشی رو ببینم.</string>
     <string name="hint_ok">خوبه، همین‌جا ثابت نگه دار و عکس بگیر.</string>
     <string name="move_left">به چپ بچرخ</string>

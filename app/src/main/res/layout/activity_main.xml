@@ -40,8 +40,8 @@
             android:paddingStart="10dp" android:paddingEnd="10dp" android:paddingTop="8dp" android:paddingBottom="8dp" android:layoutDirection="rtl">
 
             <!-- guidance: animated 3D view of where to hold the phone (tap for the tutorial) + the instruction -->
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:background="@drawable/bg_hint" android:padding="6dp" android:gravity="center_vertical">
-                <ir.scan3d.app.GuideView android:id="@+id/guide" android:layout_width="132dp" android:layout_height="132dp" />
+            <LinearLayout android:id="@+id/hintBox" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:background="@drawable/bg_hint" android:padding="6dp" android:gravity="center_vertical">
+                <ir.scan3d.app.GuideView android:id="@+id/guide" android:layout_width="140dp" android:layout_height="140dp" />
                 <TextView android:id="@+id/next" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
                     android:textColor="#E5ECE8" android:paddingStart="8dp" android:paddingEnd="8dp" android:textSize="13.5sp" android:lineSpacingExtra="2dp" />
             </LinearLayout>

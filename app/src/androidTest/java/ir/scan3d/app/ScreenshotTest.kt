@@ -3,6 +3,7 @@ package ir.scan3d.app
 import android.Manifest
 import android.content.Intent
 import android.graphics.Bitmap
+import android.view.View
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -64,6 +65,9 @@ class ScreenshotTest {
         ActivityScenario.launch<MainActivity>(Intent(ctx, MainActivity::class.java).putExtra("sid", "s_demo").putExtra("demoPose", doubleArrayOf(150.0, 30.0, 0.36, 0.0))).use {
             Thread.sleep(3500)   // camera start
             shoot("01_main_scan")
+            it.onActivity { a -> a.findViewById<View>(R.id.guide).performClick() }
+            Thread.sleep(800)
+            shoot("01b_main_scan_bigguide")
         }
     }
 

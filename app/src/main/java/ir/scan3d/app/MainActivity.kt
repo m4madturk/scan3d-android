@@ -86,7 +86,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         b.btnResult.setOnClickListener { session?.let { startActivity(Intent(this, ResultActivity::class.java).putExtra("sid", it.sid).putExtra("calib", mode == "calib")) } }
         b.btnSessions.setOnClickListener { pickSession.launch(Intent(this, SessionsActivity::class.java)) }
         b.btnHelp.setOnClickListener { startActivity(Intent(this, TutorialActivity::class.java).putExtra("page", if (mode == "calib") 6 else 0)) }
-        b.guide.setOnClickListener { startActivity(Intent(this, TutorialActivity::class.java).putExtra("page", if (mode == "calib") 6 else 2)) }
+        b.guide.setOnClickListener { toggleGuideSize() }
+        b.guide.setOnLongClickListener { startActivity(Intent(this, TutorialActivity::class.java).putExtra("page", if (mode == "calib") 6 else 2)); true }
         val prefs = getSharedPreferences("scan3d", MODE_PRIVATE)
         if (!prefs.getBoolean("tutorial_seen", false)) { prefs.edit().putBoolean("tutorial_seen", true).apply(); startActivity(Intent(this, TutorialActivity::class.java)) }
         b.modeSel.setOnCheckedChangeListener { _, id ->
@@ -96,6 +97,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             persist(); refresh()
         }
         b.btnTorch.alpha = 0.6f
+        b.guide.compact = true
 
         val sid = intent.getStringExtra("sid")
         if (intent.getStringExtra("mode") == "calib") mode = "calib"
@@ -313,6 +315,23 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     private var scanBase = ""
+    private var guideLarge = false
+
+    /** Tap on the little 3D guide: enlarge it to the full panel width (text moves below), tap again to shrink. */
+    private fun toggleGuideSize() {
+        guideLarge = !guideLarge
+        val lp = b.guide.layoutParams as android.widget.LinearLayout.LayoutParams
+        if (guideLarge) {
+            b.hintBox.orientation = android.widget.LinearLayout.VERTICAL
+            lp.width = android.widget.LinearLayout.LayoutParams.MATCH_PARENT; lp.height = Ui.dp(this, 250)
+            b.guide.compact = false
+        } else {
+            b.hintBox.orientation = android.widget.LinearLayout.HORIZONTAL
+            lp.width = Ui.dp(this, 140); lp.height = Ui.dp(this, 140)
+            b.guide.compact = true
+        }
+        b.guide.layoutParams = lp; b.guide.requestLayout(); b.guide.invalidate()
+    }
 
     /** Hint = what the next photo is + how to move from where the phone is now (live board pose). */
     private fun updateHint() {

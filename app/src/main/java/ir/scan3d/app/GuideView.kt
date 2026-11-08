@@ -47,6 +47,7 @@ class GuideView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = n
     var viewEl = 34.0
     var caption: String? = null
     var showClock = true
+    var compact = false                      // small widget: hide empty slots
 
     private var shown: PhonePose? = null
     private var animStart = 0L
@@ -73,9 +74,29 @@ class GuideView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = n
         val rn = sqrt(right[0] * right[0] + right[1] * right[1] + right[2] * right[2]); for (i in 0..2) right[i] /= rn
         // up = right x fwd
         upv[0] = right[1] * fwd[2] - right[2] * fwd[1]; upv[1] = right[2] * fwd[0] - right[0] * fwd[2]; upv[2] = right[0] * fwd[1] - right[1] * fwd[0]
-        val reach = if (mode == Mode.SCAN) orbitMm + 120 else 420.0
-        scale = (min(width, height) * 0.5f / reach.toFloat()) * 0.96f
-        cx0 = width / 2f; cy0 = height / 2f + min(width, height) * 0.06f
+        // fit everything that will be drawn: board, slots, phones (+ their extent), target
+        scale = 1f; cx0 = 0f; cy0 = 0f
+        var x0 = Float.MAX_VALUE; var x1 = -Float.MAX_VALUE; var y0 = Float.MAX_VALUE; var y1 = -Float.MAX_VALUE
+        fun fit(x: Double, y: Double, z: Double, r: Double) { val q = px(x, y, z); x0 = min(x0, q[0] - r.toFloat()); x1 = max(x1, q[0] + r.toFloat()); y0 = min(y0, q[1] - r.toFloat()); y1 = max(y1, q[1] + r.toFloat()) }
+        for (sx in listOf(-87.5, 87.5)) for (sy in listOf(-125.0, 125.0)) fit(sx, sy, 0.0, 0.0)
+        if (mode == Mode.SCAN && showClock) for (k in 0 until 4) { val az = Math.toRadians(k * 90.0); fit(190.0 * sin(az), 190.0 * cos(az), 0.0, 12.0) }
+        // a FIXED envelope (not the live phone), so the picture does not zoom around while the user moves
+        if (mode == Mode.SCAN) for (b in bandEl.indices) for (a in 0 until slotAz) {
+            val az = Math.toRadians(a * 360.0 / slotAz); val el = Math.toRadians(bandEl[b])
+            fit(orbitMm * sin(az) * cos(el), orbitMm * cos(az) * cos(el), 15.0 + orbitMm * sin(el), 60.0)
+        } else for (pp in listOf(PhonePose(180.0, 89.0, 300.0, 0.0, 0.0, 0.0, 0.0), PhonePose(180.0, 50.0, 280.0, 0.0, 0.0, 0.0, 0.0), PhonePose(0.0, 50.0, 280.0, 0.0, 0.0, 0.0, 0.0),
+                                  PhonePose(270.0, 50.0, 280.0, 0.0, 0.0, 0.0, 0.0), PhonePose(90.0, 50.0, 280.0, 0.0, 0.0, 0.0, 0.0))) {
+            val a = Math.toRadians(pp.az); val e = Math.toRadians(pp.el)
+            fit(pp.aimX + pp.dist * sin(a) * cos(e), pp.aimY + pp.dist * cos(a) * cos(e), pp.aimZ + pp.dist * sin(e), 80.0)
+        }
+        for (pp in listOfNotNull(target) + keyframes) {
+            val a = Math.toRadians(pp.az); val e = Math.toRadians(pp.el)
+            fit(pp.aimX + pp.dist * sin(a) * cos(e), pp.aimY + pp.dist * cos(a) * cos(e), pp.aimZ + pp.dist * sin(e), 80.0)
+        }
+        val ex = max(1f, x1 - x0); val ey = max(1f, y1 - y0)
+        val m = 0.90f
+        scale = min(width * m / ex, height * m / ey)
+        cx0 = width / 2f - scale * (x0 + x1) / 2f; cy0 = height / 2f - scale * (y0 + y1) / 2f
     }
 
     private fun px(x: Double, y: Double, z: Double): FloatArray {
@@ -95,6 +116,8 @@ class GuideView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = n
 
     private fun v(x: Double, y: Double, z: Double) = doubleArrayOf(x, y, z)
 
+    private val lensFaces = ArrayList<Face>()      // drawn last, only when the lens side faces the viewer
+
     private fun phoneFaces(p: PhonePose, body: Int, screen: Int, edge: Int, ghost: Boolean): List<Face> {
         val a = Math.toRadians(p.az); val e = Math.toRadians(p.el)
         val dir = doubleArrayOf(sin(a) * cos(e), cos(a) * cos(e), sin(e))
@@ -110,19 +133,22 @@ class GuideView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = n
         val u2 = DoubleArray(3) { cos(ro) * u[it] + sin(ro) * r[it] }
         val r2 = DoubleArray(3) { -sin(ro) * u[it] + cos(ro) * r[it] }
         u = u2; r = r2
-        val hw = 36.0; val hh = 76.0; val th = 9.0
+        val hw = 38.0; val hh = 78.0; val th = 16.0
         fun c(sr: Double, su: Double, sf: Double) = doubleArrayOf(P[0] + sr * r[0] + su * u[0] + sf * f[0], P[1] + sr * r[1] + su * u[1] + sf * f[1], P[2] + sr * r[2] + su * u[2] + sf * f[2])
         val b00 = c(-hw, -hh, 0.0); val b10 = c(hw, -hh, 0.0); val b11 = c(hw, hh, 0.0); val b01 = c(-hw, hh, 0.0)   // back (lens side)
         val s00 = c(-hw, -hh, -th); val s10 = c(hw, -hh, -th); val s11 = c(hw, hh, -th); val s01 = c(-hw, hh, -th)   // screen side
         val out = ArrayList<Face>()
         out += face(body, edge, b00, b10, b11, b01)
-        out += face(screen, edge, s00, s10, s11, s01)
+        out += face(body, edge, s00, s10, s11, s01)
+        // screen inset on the front face
+        val i00 = c(-hw + 5, -hh + 7, -th - 0.5); val i10 = c(hw - 5, -hh + 7, -th - 0.5); val i11 = c(hw - 5, hh - 7, -th - 0.5); val i01 = c(-hw + 5, hh - 7, -th - 0.5)
+        out += face(screen, null, i00, i10, i11, i01)
         out += face(body, edge, b00, b10, s10, s00); out += face(body, edge, b01, b11, s11, s01)
         out += face(body, edge, b00, b01, s01, s00); out += face(body, edge, b10, b11, s11, s10)
         // lens: small square on the back, top-left corner
         val l = 9.0; val lc = c(-hw + 16, hh - 18, 0.6)
         val lx = DoubleArray(3) { r[it] * l }; val ly = DoubleArray(3) { u[it] * l }
-        out += face(if (ghost) Color.argb(160, 10, 40, 38) else Color.rgb(12, 18, 16), null,
+        if (f[0] * fwd[0] + f[1] * fwd[1] + f[2] * fwd[2] < 0) lensFaces += face(if (ghost) Color.argb(200, 10, 40, 38) else Color.rgb(12, 18, 16), if (ghost) null else Color.rgb(120, 132, 126),
             doubleArrayOf(lc[0] - lx[0] - ly[0], lc[1] - lx[1] - ly[1], lc[2] - lx[2] - ly[2]), doubleArrayOf(lc[0] + lx[0] - ly[0], lc[1] + lx[1] - ly[1], lc[2] + lx[2] - ly[2]),
             doubleArrayOf(lc[0] + lx[0] + ly[0], lc[1] + lx[1] + ly[1], lc[2] + lx[2] + ly[2]), doubleArrayOf(lc[0] - lx[0] + ly[0], lc[1] - lx[1] + ly[1], lc[2] - lx[2] + ly[2]))
         return out
@@ -203,7 +229,7 @@ class GuideView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = n
 
         val now = System.currentTimeMillis()
         val cur = currentPose(now)
-        val faces = ArrayList<Face>()
+        val faces = ArrayList<Face>(); lensFaces.clear()
         if (showObject && mode == Mode.SCAN) faces += boxFaces(0.0, 0.0, 62.0, 42.0, 30.0)
 
         // orbit slots (scan) — dots on the orbit sphere around the aim point
@@ -211,6 +237,7 @@ class GuideView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = n
             for ((key, st) in slots) {
                 val (b, a) = key.split("-").map { it.toInt() }
                 if (b >= bandEl.size) continue
+                if (compact && st == 0) continue
                 val az = Math.toRadians(a * 360.0 / slotAz); val el = Math.toRadians(bandEl[b])
                 val p = px(orbitMm * sin(az) * cos(el), orbitMm * cos(az) * cos(el), 15.0 + orbitMm * sin(el))
                 val r = (if (st == 2) 7f else 5f) * d
@@ -236,6 +263,7 @@ class GuideView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = n
         }
         faces.sortByDescending { it.depth }       // far first (depth grows away from the viewer)
         for (f in faces) drawFace(c, f)
+        for (f in lensFaces) drawFace(c, f)
 
         // sight line from the lens to the aim point, and the move arrow
         if (cur != null) {
