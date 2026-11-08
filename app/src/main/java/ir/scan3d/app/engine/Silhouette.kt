@@ -174,6 +174,20 @@ object Silhouette {
         return BooleanArray(w * h) { label[it] == best }
     }
 
+    /** Connected-component labels (4-neighbourhood), 0 = background. */
+    fun components(m: BooleanArray, w: Int, h: Int): IntArray {
+        val label = IntArray(w * h); var cur = 0
+        val stack = IntArray(w * h)
+        for (s in 0 until w * h) {
+            if (!m[s] || label[s] != 0) continue
+            cur++; var sp = 0; stack[sp++] = s; label[s] = cur
+            while (sp > 0) { val i = stack[--sp]; val u = i % w; val v = i / w
+                for ((du, dv) in arrayOf(1 to 0, -1 to 0, 0 to 1, 0 to -1)) { val uu = u + du; val vv = v + dv; if (uu < 0 || vv < 0 || uu >= w || vv >= h) continue
+                    val j = vv * w + uu; if (m[j] && label[j] == 0) { label[j] = cur; stack[sp++] = j } } }
+        }
+        return label
+    }
+
     fun fillHoles(m: BooleanArray, w: Int, h: Int): BooleanArray {
         // flood the background from the border; everything not reached and not object becomes object
         val bg = BooleanArray(w * h); val stack = IntArray(w * h); var sp = 0

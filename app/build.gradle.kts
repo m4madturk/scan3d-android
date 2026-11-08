@@ -30,6 +30,7 @@ android {
     buildFeatures { viewBinding = true }
     testOptions { unitTests.isIncludeAndroidResources = false }
     packaging { jniLibs { useLegacyPackaging = true } }
+    androidResources { noCompress += "onnx" }
 }
 
 dependencies {
@@ -47,6 +48,7 @@ dependencies {
     implementation("org.opencv:opencv:4.10.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.json:json:20240303")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.19.2")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

@@ -22,6 +22,7 @@ import org.opencv.objdetect.CharucoBoard
 import org.opencv.objdetect.Objdetect
 import java.io.File
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 
@@ -81,12 +82,38 @@ object Pipeline {
         // a tangent plane there would carve away everything above the board
         val onBoard = geo.stickers.filter { abs(it.centre.z) < 1.0 && it.centre.x in 0.0..175.0 && it.centre.y in 0.0..250.0 }.map { it.id }.toSet()
         onBoard.forEach { id -> log("sticker $id lies on the board plane: probably a misread board marker, ignored") }
-        var dropped = 0
+        var dropped = 0; var aiOk = 0; var aiFallback = 0
+        val objCentres = geo.stickers.filter { it.id !in onBoard }.map { it.centre }
         for ((k, ui) in use.withIndex()) {
             val pose = geo.poses[k] ?: continue
             progress("دورخط عکس ${k + 1} از ${use.size}…", 0.1 + 0.4 * k / use.size)
             val gray = loadGray(files[ui], sw, sh, shots[ui].fileRot) ?: continue
             val r = Silhouette.extract(gray, sw, sh, camS, pose, boardTemplate) ?: run { log("shot ${shots[ui].n}: no silhouette"); null } ?: continue
+            // AI refinement: segment a crop centred on the projected stickers; accept only if every sticker lands inside
+            var aiNote = ""
+            if (segmenter != null && segmenter.available && objCentres.size >= 1) {
+                val uv = objCentres.mapNotNull { c -> camS.project(pose.toCamera(c)) }
+                if (uv.isNotEmpty()) {
+                    val cx = uv.sumOf { it[0] } / uv.size; val cy = uv.sumOf { it[1] } / uv.size
+                    val spread = uv.maxOf { hypot(it[0] - cx, it[1] - cy) }
+                    val rad = max(0.15 * max(sw, sh), 1.8 * spread + 0.08 * max(sw, sh)).toInt()
+                    val x0 = max(0, (cx - rad).toInt()); val y0 = max(0, (cy - rad).toInt())
+                    val cw = min(sw, (cx + rad).toInt()) - x0; val chh = min(sh, (cy + rad).toInt()) - y0
+                    val am = if (cw > 20 && chh > 20) segmenter.maskCrop(gray, sw, sh, x0, y0, cw, chh) else null
+                    if (am != null) {
+                        val frac = am.count { it }.toDouble() / (cw * chh)
+                        val labels = Silhouette.components(am, sw, sh)
+                        val keep = uv.mapNotNull { p -> val u = p[0].toInt(); val v = p[1].toInt(); if (u in 0 until sw && v in 0 until sh && labels[v * sw + u] != 0) labels[v * sw + u] else null }.toSet()
+                        val allIn = keep.size > 0 && uv.all { p -> val u = p[0].toInt(); val v = p[1].toInt(); u in 0 until sw && v in 0 until sh && am[v * sw + u] }
+                        if (frac in 0.02..0.6 && allIn) {
+                            val kept = BooleanArray(sw * sh) { labels[it] in keep }
+                            val dil = Silhouette.dilate(kept, sw, sh, 2)
+                            for (i in r.mask.indices) r.mask[i] = r.mask[i] && dil[i]
+                            aiOk++; aiNote = ", AI %.0f%% of crop".format(100 * frac)
+                        } else { aiFallback++; aiNote = ", AI rejected (%.0f%% of crop, stickers inside: $allIn)".format(100 * frac) }
+                    } else { aiFallback++; aiNote = ", AI unavailable" }
+                }
+            }
             // sanity: the stickers seen in this shot sit on the object, so their solved centres must project inside the mask
             val seen = shots[ui].stickers.map { it.id }.toSet()
             var tot = 0; var inside = 0
@@ -102,10 +129,11 @@ object Pipeline {
             }
             val area = r.area.toDouble() / (sw * sh)
             if (tot >= 3 && inside < 0.6 * tot) { dropped++; log("shot ${shots[ui].n}: silhouette misses the stickers ($inside/$tot inside, area %.1f%%); dropped".format(100 * area)); continue }
-            log("shot ${shots[ui].n}: board verified %.0f%%, object/unknown area %.1f%% of image, stickers inside $inside/$tot".format(100 * r.solidity, 100 * area))
+            log("shot ${shots[ui].n}: board verified %.0f%%, object/unknown area %.1f%% of image, stickers inside $inside/$tot$aiNote".format(100 * r.solidity, 100 * area))
             views.add(SilView(sw, sh, r.mask, camS, pose))
         }
         if (dropped > 0) log("$dropped silhouette(s) dropped by the sticker check")
+        if (segmenter != null) log("AI segmentation: $aiOk views refined, $aiFallback fell back to the structure test")
         require(views.size >= 2) { "fewer than 2 usable silhouettes" }
 
         // marker planes (z-up frame)

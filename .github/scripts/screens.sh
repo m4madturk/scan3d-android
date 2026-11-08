@@ -14,6 +14,10 @@ run_set() {   # $1 = tag
   adb shell run-as ir.scan3d.app rm -rf files/screens files/sessions
 }
 
+# on-device segmentation model: must load and isolate an object on a checkerboard crop
+adb shell am instrument -w -e class ir.scan3d.app.SegmenterTest ir.scan3d.app.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tail -15
+adb logcat -d | grep -E "segmenter:" | tail -3 || true
+
 # pixel_5: 1080x2340 @ 440 dpi (393 x 851 dp)
 run_set pixel5
 # a small, older phone: 720x1280 @ 320 dpi (360 x 640 dp)

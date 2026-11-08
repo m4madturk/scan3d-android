@@ -68,10 +68,13 @@ class BuildService : Service() {
                     }
                     log(if (prior != null) "using camera profile as prior" else "no camera profile; self-calibrating")
                     val files = shots.map { File(dir, "shot${it.n}.jpg") }
+                    val seg = Segmenter(this@BuildService)
+                    log(if (seg.available) "AI segmentation model loaded (u2netp)" else "AI segmentation model not available")
                     val (mesh, rep) = Pipeline.build(shots, files, convex, prior, 0.4, { msg, p ->
                         write(resultFile, JSONObject().put("state", "processing").put("progress", p).put("message", msg))
                         nm().notify(1, notif(msg, (p * 100).toInt()))
-                    }, ::log)
+                    }, ::log, seg)
+                    seg.close()
                     mesh.writeStl(File(dir, "model.stl"))
                     Preview.render(mesh, File(dir, "preview.png"))
                     val j = Pipeline.reportJson(rep).put("state", "done").put("stl", File(dir, "model.stl").absolutePath).put("preview", File(dir, "preview.png").absolutePath)
