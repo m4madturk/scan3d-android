@@ -51,29 +51,28 @@ object Silhouette {
         // projected size of one 25 mm square (px): from the camera distance and focal length
         val dist = sqrt(C.x * C.x + C.y * C.y + C.z * C.z).coerceAtLeast(50.0)
         val squarePx = 25.0 * cam.f / dist
-        val win = max(9, (0.5 * squarePx).toInt()) or 1
-        val r = win / 2
+        val sigma = max(2.0, 0.3 * squarePx)
 
-        // ---- structure test: NCC between the photo and the (slightly blurred) render ----
+        // ---- structure test: Gaussian-weighted NCC between the photo and the (slightly blurred) render ----
+        // Gaussian weighting keeps the decision local to the window centre, so the object boundary lands
+        // close to its true edge (box windows erode the object by almost half a window).
         val e = FloatArray(w * h) { (expected[it].toInt() and 255).toFloat() }
         val g = FloatArray(w * h) { (gray[it].toInt() and 255).toFloat() }
         val eb = boxMean(e, w, h, 1)                        // mimic the camera blur on the render
-        val me = boxMean(eb, w, h, r); val mg = boxMean(g, w, h, r)
-        val ee = boxMean(FloatArray(w * h) { eb[it] * eb[it] }, w, h, r)
-        val gg = boxMean(FloatArray(w * h) { g[it] * g[it] }, w, h, r)
-        val eg = boxMean(FloatArray(w * h) { eb[it] * g[it] }, w, h, r)
+        val me = gaussBlur(eb, w, h, sigma); val mg = gaussBlur(g, w, h, sigma)
+        val ee = gaussBlur(FloatArray(w * h) { eb[it] * eb[it] }, w, h, sigma)
+        val gg = gaussBlur(FloatArray(w * h) { g[it] * g[it] }, w, h, sigma)
+        val eg = gaussBlur(FloatArray(w * h) { eb[it] * g[it] }, w, h, sigma)
         val passed = BooleanArray(w * h)
         for (i in 0 until w * h) {
             if (!valid2[i]) continue
             val ve = ee[i] - me[i] * me[i]; val vg = gg[i] - mg[i] * mg[i]
-            if (ve < 30f * 30f) continue                        // no board structure in this window: unknown
+            if (ve < 600f) continue                              // no board structure around: unknown
             val ncc = (eg[i] - me[i] * mg[i]) / sqrt(max(ve, 1e-3f) * max(vg, 1e-3f))
-            if (ncc > 0.5f) passed[i] = true
+            if (ncc > 0.65f) passed[i] = true
         }
-        // a window still correlates when the object covers its edge zone, so a pixel is SURE board only if
-        // the windows around it all pass (erosion). Conservative: the object may be a little too large in one
-        // view (other views carve that), but it is never eaten away.
-        var sure = erode(passed, w, h, max(1, (0.35 * win).toInt()))
+        // small safety erosion: never eat into the object (other views carve what is too generous here)
+        var sure = erode(passed, w, h, max(2, (0.06 * squarePx).toInt()))
 
         // ---- level test for the parts the structure cannot judge (object over a plain square) ----
         val blacks = ArrayList<Int>(); val whites = ArrayList<Int>()
@@ -111,6 +110,14 @@ object Silhouette {
         var nSure = 0; for (b in sure) if (b) nSure++
         var area = 0; for (i in 0 until w * h) if (valid2[i] && inside[i]) area++
         return Result(inside, nSure.toDouble() / nValid, area)
+    }
+
+    /** Gaussian blur approximated by three successive box blurs (O(1) per pixel regardless of sigma). */
+    fun gaussBlur(src: FloatArray, w: Int, h: Int, sigma: Double): FloatArray {
+        val wb = sqrt(12.0 * sigma * sigma / 3.0 + 1.0)
+        val r = max(1, ((wb - 1) / 2).toInt())
+        var a = boxMean(src, w, h, r); a = boxMean(a, w, h, r); a = boxMean(a, w, h, r)
+        return a
     }
 
     /** Separable box mean with radius r (window 2r+1), zero-padded at the borders by replication. */

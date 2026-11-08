@@ -115,7 +115,8 @@ object Pipeline {
         progress("تراش اولیه…", 0.55)
         // tolerate a few wrong silhouettes: a voxel is carved only when >= votes views see it outside
         var votes = max(1, Math.round(0.06 * views.size).toInt())
-        val boardBounds = arrayOf(doubleArrayOf(-15.0, 190.0), doubleArrayOf(-15.0, 265.0), doubleArrayOf(0.0, 120.0))
+        // only above the board itself: outside it every view is "unknown" and nothing could ever be carved there
+        val boardBounds = arrayOf(doubleArrayOf(0.0, 175.0), doubleArrayOf(0.0, 250.0), doubleArrayOf(0.0, 120.0))
         // where do the solved stickers sit? the object must contain them
         val stZ = geo.stickers.filter { it.id !in onBoard }.map { -it.centre.z }
         log("stickers z-up range %.1f .. %.1f mm; carve tolerance $votes of ${views.size} views".format(stZ.minOrNull() ?: 0.0, stZ.maxOrNull() ?: 0.0))
