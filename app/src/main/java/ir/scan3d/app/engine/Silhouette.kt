@@ -62,16 +62,18 @@ object Silhouette {
         val ee = boxMean(FloatArray(w * h) { eb[it] * eb[it] }, w, h, r)
         val gg = boxMean(FloatArray(w * h) { g[it] * g[it] }, w, h, r)
         val eg = boxMean(FloatArray(w * h) { eb[it] * g[it] }, w, h, r)
-        var sure = BooleanArray(w * h)
+        val passed = BooleanArray(w * h)
         for (i in 0 until w * h) {
             if (!valid2[i]) continue
             val ve = ee[i] - me[i] * me[i]; val vg = gg[i] - mg[i] * mg[i]
             if (ve < 30f * 30f) continue                        // no board structure in this window: unknown
             val ncc = (eg[i] - me[i] * mg[i]) / sqrt(max(ve, 1e-3f) * max(vg, 1e-3f))
-            if (ncc > 0.5f) sure[i] = true
+            if (ncc > 0.5f) passed[i] = true
         }
-        // a window that straddles the object edge fails although its centre may still be board: tighten
-        sure = dilate(sure, w, h, max(1, (0.1 * win).toInt()))
+        // a window still correlates when the object covers its edge zone, so a pixel is SURE board only if
+        // the windows around it all pass (erosion). Conservative: the object may be a little too large in one
+        // view (other views carve that), but it is never eaten away.
+        var sure = erode(passed, w, h, max(1, (0.35 * win).toInt()))
 
         // ---- level test for the parts the structure cannot judge (object over a plain square) ----
         val blacks = ArrayList<Int>(); val whites = ArrayList<Int>()
@@ -95,11 +97,13 @@ object Silhouette {
                 pred[v * w + u] = lo + ((hi - lo) * ((expected[v * w + u].toInt() and 255) / 255.0)).toInt()
                 thr[v * w + u] = max(22, min(thresh, (0.33 * (hi - lo)).toInt())) }
             for (v in 0 until h) for (u in 0 until w) {
-                val i = v * w + u; if (!valid2[i] || !sure[i]) continue
+                val i = v * w + u; if (!valid2[i] || !passed[i]) continue
                 var mn = Int.MAX_VALUE; var mx = Int.MIN_VALUE
                 for (dv in -3..3) { val vv = v + dv; if (vv < 0 || vv >= h) continue; for (du in -3..3) { val uu = u + du; if (uu < 0 || uu >= w) continue; val p = pred[vv * w + uu]; if (p < mn) mn = p; if (p > mx) mx = p } }
                 val gv = gray[i].toInt() and 255
+                val c = (v / ch) * cells + (u / cw); val mid = (cellLo[c] + cellHi[c]) / 2
                 if (gv > mx + thr[i] || gv < mn - thr[i]) sure[i] = false            // strong mismatch: object, never board
+                else if (mx < mid && gv < mx + thr[i]) sure[i] = true                // dark expected, dark observed: exact board pixel
             }
         }
         if (aiMask != null) { val dil = dilate(aiMask, w, h, 2); for (i in sure.indices) if (!dil[i] && valid2[i]) sure[i] = true }   // outside the AI mask is board

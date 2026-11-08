@@ -137,8 +137,8 @@ object Pipeline {
         val vox = max(voxel, Math.cbrt(span[0] * span[1] * span[2] / 1.0e7))    // cap at ~10 M voxels (grid + marching cubes ~ 100 MB)
         progress("تراش نهایی (${"%.2f".format(vox)} mm)…", 0.6)
         val g = Carve.carve(views, b, vox, 0.5, planes, votes) { p -> progress("تراش نهایی…", 0.6 + 0.3 * p) }
-        val skirt = Carve.removeSkirt(g, 2.5)
-        if (skirt > 0) log("removed shadow skirt: $skirt thin columns (< 2.5 mm)")
+        val skirt = Carve.removeSkirt(g, 4.5)
+        if (skirt > 0) log("removed base skirt: $skirt thin columns (< 4.5 mm)")
         progress("ساخت مش…", 0.92)
         val mesh = MarchingCubes.run(g)
         val bb = mesh.bounds()

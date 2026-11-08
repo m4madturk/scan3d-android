@@ -113,9 +113,9 @@ class EngineTest {
             if (truthObj[i]) { objN++; if (res.mask[i]) objInside++ } else { boardN++; if (res.mask[i]) boardInside++ }
         }
         println("silhouette: board verified %.1f%%; object kept %.1f%%; board wrongly inside %.1f%%".format(100 * res.solidity, 100.0 * objInside / objN, 100.0 * boardInside / boardN))
-        assertTrue("object must stay inside", objInside > 0.93 * objN)
-        assertTrue("most of the board must be verified (carvable)", boardInside < 0.45 * boardN)
-        assertTrue(res.solidity > 0.5)
+        assertTrue("object must stay inside: %.1f%%".format(100.0 * objInside / objN), objInside > 0.985 * objN)
+        assertTrue("enough of the board must be verified (carvable): inside %.1f%%".format(100.0 * boardInside / boardN), boardInside < 0.5 * boardN)
+        assertTrue(res.solidity > 0.45)
     }
 
     @Test
