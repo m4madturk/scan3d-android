@@ -290,7 +290,7 @@ class GuideView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = n
             }
         }
         caption?.let { pText.textSize = 12f * d; pText.color = Color.rgb(229, 236, 232); c.drawText(it, width / 2f, height - 8 * d, pText) }
-        if (keyframes.size > 1 || live != null) postInvalidateOnAnimation()
+        if (keyframes.size > 1 || live != null) postInvalidateDelayed(66)
     }
 
     /** Convenience: slot ring for the scan layout. */

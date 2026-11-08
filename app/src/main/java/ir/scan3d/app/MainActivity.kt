@@ -64,7 +64,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private var azKnown = false
     private val rotM = FloatArray(9)
     private var lastHint = 0L
-    private var orientationListener: android.view.OrientationEventListener? = null
     private val fa = { n: Int -> Ui.fa(n) }
     private fun clockOf(az: Double): String { val k = ((Math.round(az / 30.0).toInt() % 12) + 12) % 12; return Ui.fa(if (k == 0) 12 else k) }
 
@@ -118,14 +117,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     override fun onResume() {
         super.onResume()
-        if (orientationListener == null) orientationListener = object : android.view.OrientationEventListener(this) {
-            override fun onOrientationChanged(o: Int) {
-                if (o == ORIENTATION_UNKNOWN) return
-                val rot = when { o in 45..134 -> android.view.Surface.ROTATION_270; o in 135..224 -> android.view.Surface.ROTATION_180; o in 225..314 -> android.view.Surface.ROTATION_90; else -> android.view.Surface.ROTATION_0 }
-                cam.imageCapture?.let { if (it.targetRotation != rot) it.targetRotation = rot }
-            }
-        }
-        orientationListener?.enable()
         (getSystemService(SENSOR_SERVICE) as SensorManager).let { sm ->
             sm.getDefaultSensor(Sensor.TYPE_GYROSCOPE)?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
             sm.getDefaultSensor(Sensor.TYPE_GRAVITY)?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
@@ -136,7 +127,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         demoPose?.let { dp -> livePose = dp; b.guide.live = GuideView.PhonePose(dp.az, dp.el, dp.dist * 1000, dp.roll, 0.0, 0.0, if (mode == "calib") 0.0 else 15.0); b.guide.liveFresh = true; updateHint() }
     }
 
-    override fun onPause() { super.onPause(); orientationListener?.disable(); (getSystemService(SENSOR_SERVICE) as SensorManager).unregisterListener(this) }
+    override fun onPause() { super.onPause(); (getSystemService(SENSOR_SERVICE) as SensorManager).unregisterListener(this) }
     override fun onSensorChanged(e: SensorEvent) {
         when (e.sensor.type) {
             Sensor.TYPE_GYROSCOPE -> gyroRate = sqrt(e.values[0] * e.values[0] + e.values[1] * e.values[1] + e.values[2] * e.values[2])
@@ -178,7 +169,15 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private fun startCamera() { cam.start(this, b.preview, ::analyzePreview) { b.status.text = getString(R.string.ready) } }
 
     // ---------------- live preview analysis ----------------
+    private var lastAnalysis = 0L
+    private var lastBoardSeen = 0L
+
     private fun analyzePreview(img: ImageProxy) {
+        val now = System.currentTimeMillis()
+        // CPU budget: ~5 detections per second is plenty for guidance; skip blurred frames while the phone
+        // turns fast (the IMU carries the pose), and everything while a photo is being processed
+        if (busy || now - lastAnalysis < 200 || (gyroRate > 1.2f && now - lastBoardSeen < 1500)) { img.close(); return }
+        lastAnalysis = now
         try {
             val w = img.width; val h = img.height
             val plane = img.planes[0]; val buf = plane.buffer; val stride = plane.rowStride
@@ -195,6 +194,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             val ids = lv.ids; val nBoard = lv.nBoard
             val boardOk = nBoard >= 6
             livePose = demoPose ?: fuse(lv.pose, lv.stickerSidePx, fPrev)
+            if (lv.pose != null) lastBoardSeen = now
             val still = gyroRate < 0.08f
             stillFrames = if (still) stillFrames + 1 else 0
             runOnUiThread {
@@ -205,15 +205,29 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 b.guide.live = lp?.let { GuideView.PhonePose(it.az, it.el, it.dist * 1000, it.roll, 0.0, 0.0, if (mode == "calib") 0.0 else 15.0) }
                 b.guide.liveFresh = lp != null && (poseFromBoard || azKnown || demoPose != null)
                 if (System.currentTimeMillis() - lastHint > 400) { lastHint = System.currentTimeMillis(); updateHint() }
-                if (boardOk && !autoLockDone && mode == "scan" && !cam.locked && stillFrames > 15) {
+                if (boardOk && !autoLockDone && mode == "scan" && !cam.locked && stillFrames > 5) {
                     // first steady framing of the board: lock exposure/WB/focus so every shot shares one camera
                     cam.lock(); autoLockDone = true; b.btnLock.text = getString(R.string.unlock); toast(getString(R.string.locked_auto))
                 }
                 b.overlay.invalidate()
             }
-            if (autoShutter && !busy && boardOk && stillFrames > 12 && (ids.isNotEmpty() || mode == "calib")) { stillFrames = 0; runOnUiThread { capture() } }
+            if (autoShutter && !busy && boardOk && stillFrames > 3 && (ids.isNotEmpty() || mode == "calib") && autoWanted(livePose, now)) { stillFrames = 0; runOnUiThread { capture() } }
             gray.release(); up.release()
         } catch (e: Exception) { /* preview analysis is best effort */ } finally { img.close() }
+    }
+
+    private var lastShotAt = 0L
+    private var lastShotPose: Pose? = null
+
+    /** Auto-shutter policy: not more than one photo per 2.5 s, only after the phone moved, and never a slot that is already taken. */
+    private fun autoWanted(p: Pose?, now: Long): Boolean {
+        if (now - lastShotAt < 2500) return false
+        val s = session ?: return false
+        if (p != null) {
+            lastShotPose?.let { q -> val daz = abs(((p.az - q.az + 540) % 360) - 180); if (daz < 12 && abs(p.el - q.el) < 8 && abs(p.dist - q.dist) < 0.05) return false }
+            if (mode == "scan" && s.layout() != null) { val k = s.slotOf(p); if (k != null && k in s.takenSlots()) return false }
+        } else if (now - lastShotAt < 6000) return false
+        return true
     }
 
     // ---------------- capture ----------------
@@ -224,6 +238,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val s = session ?: return
         val n = (s.shots.maxOfOrNull { it.n } ?: 0) + 1
         val shot = Shot(n, "k$n")
+        shot.devRoll = gravRoll                       // how the phone was held: decides how the HAL may have rotated the JPEG
+        lastShotAt = System.currentTimeMillis(); lastShotPose = livePose
         val file = File(store.sessionDir(s.sid), "shot$n.jpg")
         b.status.text = getString(R.string.capturing)
         ic.takePicture(ImageCapture.OutputFileOptions.Builder(file).build(), ContextCompat.getMainExecutor(this),
@@ -242,9 +258,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 // CameraX writes the sensor-frame JPEG with an EXIF orientation tag: read it, keep the sensor frame
                 val exif = ExifInterface(file.absolutePath)
                 shot.orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, 1)
-                val gray = Imgcodecs.imread(file.absolutePath, Imgcodecs.IMREAD_GRAYSCALE)
+                val raw = Imgcodecs.imread(file.absolutePath, Imgcodecs.IMREAD_GRAYSCALE)
+                val gray = toSensorFrame(raw, shot)
                 shot.w = gray.cols(); shot.h = gray.rows()
-                shot.landscape = shot.orientation !in intArrayOf(6, 8)   // provisional; replaced by the board-relative roll below
                 val a = Detector.analyze(gray, cam.focalPx?.let { it * gray.cols() / (cam.sensorSize?.width ?: gray.cols()) })
                 gray.release()
                 shot.stickers = a.stickers; shot.board = a.board; shot.sharp = a.sharpness; shot.millis = a.millis
@@ -269,6 +285,31 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 withContext(Dispatchers.Main) { toast("analyze: ${e.message}"); refresh() }
             } finally { busy = false }
         }
+    }
+
+    /**
+     * Some phones (Samsung among them) rotate the JPEG pixels to the way the phone was held, others store the
+     * raw sensor frame and only tag EXIF. Everything downstream (lens profile, solver, silhouettes) wants ONE
+     * frame, so the stored pixels are rotated back to the sensor frame here, using the gravity roll at capture.
+     */
+    private fun toSensorFrame(raw: Mat, shot: Shot): Mat {
+        val prefs = getSharedPreferences("scan3d", MODE_PRIVATE)
+        val portraitBuf = raw.rows() > raw.cols()
+        if (portraitBuf && !prefs.getBoolean("hal_rotates", false)) prefs.edit().putBoolean("hal_rotates", true).apply()
+        val halRotates = portraitBuf || prefs.getBoolean("hal_rotates", false)
+        var rot = 0
+        if (halRotates) {
+            val r = shot.devRoll
+            val devRot = when { abs(r) < 45 -> 0; r >= 45 && r < 135 -> 90; r <= -45 && r > -135 -> 270; else -> 180 }   // Surface.ROTATION_x in degrees
+            rot = ((devRot - cam.sensorOrientation) % 360 + 360) % 360           // undo "sensor rotated by (sensorOrientation - devRot)"
+            val swaps = rot == 90 || rot == 270
+            if (swaps != portraitBuf) rot = if (portraitBuf) ((0 - cam.sensorOrientation) % 360 + 360) % 360 else 0   // dims disagree with gravity: trust dims
+        }
+        shot.fileRot = rot
+        if (rot == 0) return raw
+        val out = Mat()
+        Core.rotate(raw, out, when (rot) { 90 -> Core.ROTATE_90_CLOCKWISE; 180 -> Core.ROTATE_180; else -> Core.ROTATE_90_COUNTERCLOCKWISE })
+        raw.release(); return out
     }
 
     // ---------------- session / modes ----------------

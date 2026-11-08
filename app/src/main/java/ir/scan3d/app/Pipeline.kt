@@ -21,6 +21,7 @@ import org.opencv.core.Size
 import org.opencv.objdetect.CharucoBoard
 import org.opencv.objdetect.Objdetect
 import java.io.File
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -63,8 +64,11 @@ object Pipeline {
         val t0 = System.currentTimeMillis()
         val done = shots.indices.filter { shots[it].state == "done" && shots[it].board != null }
         require(done.size >= 2) { "fewer than 2 shots with the board" }
-        val w = shots[done[0]].w; val h = shots[done[0]].h
+        // all shots should be in the canonical sensor frame; if a few are not (older sessions), keep the largest group
+        val groups = done.groupBy { shots[it].w to shots[it].h }
+        val (w, h) = groups.maxByOrNull { it.value.size }!!.key
         val use = done.filter { shots[it].w == w && shots[it].h == h }
+        if (use.size < done.size) log("${done.size - use.size} shot(s) have a different image size and are skipped")
         progress("حل مارکرها و دوربین…", 0.05)
         val geo = solve(use.map { shots[it] }, w, h, prior, log)
 
@@ -73,16 +77,20 @@ object Pipeline {
         val sc = min(1.0, SIL_MAX / max(w, h).toDouble())
         val sw = (w * sc).toInt(); val sh = (h * sc).toInt()
         val camS = Camera(geo.camera.f * sc, geo.camera.cx * sc, geo.camera.cy * sc, geo.camera.k1, geo.camera.k2)
+        // stickers that sit ON the board plane inside the board are misread board markers, not object points:
+        // a tangent plane there would carve away everything above the board
+        val onBoard = geo.stickers.filter { abs(it.centre.z) < 1.0 && it.centre.x in 0.0..175.0 && it.centre.y in 0.0..250.0 }.map { it.id }.toSet()
+        onBoard.forEach { id -> log("sticker $id lies on the board plane: probably a misread board marker, ignored") }
         var dropped = 0
         for ((k, ui) in use.withIndex()) {
             val pose = geo.poses[k] ?: continue
             progress("دورخط عکس ${k + 1} از ${use.size}…", 0.1 + 0.4 * k / use.size)
-            val gray = loadGray(files[ui], sw, sh) ?: continue
+            val gray = loadGray(files[ui], sw, sh, shots[ui].fileRot) ?: continue
             val r = Silhouette.extract(gray, sw, sh, camS, pose, boardTemplate) ?: run { log("shot ${shots[ui].n}: no silhouette"); null } ?: continue
             // sanity: the stickers seen in this shot sit on the object, so their solved centres must project inside the mask
             val seen = shots[ui].stickers.map { it.id }.toSet()
             var tot = 0; var inside = 0
-            for (st in geo.stickers) if (st.id in seen) {
+            for (st in geo.stickers) if (st.id in seen && st.id !in onBoard) {
                 val pr = camS.project(pose.toCamera(st.centre)) ?: continue
                 tot++
                 val u = pr[0].toInt(); val v = pr[1].toInt()
@@ -101,7 +109,7 @@ object Pipeline {
         require(views.size >= 2) { "fewer than 2 usable silhouettes" }
 
         // marker planes (z-up frame)
-        val planes = geo.stickers.filter { it.views >= min(3, views.size) }.map {
+        val planes = geo.stickers.filter { it.id !in onBoard && it.views >= min(3, views.size) }.map {
             PlaneCut(Vec3(it.centre.x, it.centre.y, -it.centre.z), Vec3(it.normalOut.x, it.normalOut.y, -it.normalOut.z), if (convex) null else 20.0)
         }
         progress("تراش اولیه…", 0.55)
@@ -109,7 +117,7 @@ object Pipeline {
         var votes = max(1, Math.round(0.06 * views.size).toInt())
         val boardBounds = arrayOf(doubleArrayOf(-15.0, 190.0), doubleArrayOf(-15.0, 265.0), doubleArrayOf(0.0, 120.0))
         // where do the solved stickers sit? the object must contain them
-        val stZ = geo.stickers.map { -it.centre.z }
+        val stZ = geo.stickers.filter { it.id !in onBoard }.map { -it.centre.z }
         log("stickers z-up range %.1f .. %.1f mm; carve tolerance $votes of ${views.size} views".format(stZ.minOrNull() ?: 0.0, stZ.maxOrNull() ?: 0.0))
         var coarse = Carve.carve(views, boardBounds, 2.0, 0.5, planes, votes)
         var b = Carve.insideBounds(coarse, 4.0)
@@ -141,15 +149,24 @@ object Pipeline {
     }
 
     /** Gray bytes of a JPEG, in SENSOR frame (EXIF ignored on purpose), downscaled to (w, h). */
-    fun loadGray(f: File, w: Int, h: Int): ByteArray? {
+    /** Gray image at (w, h) in the canonical frame: the stored pixels are rotated clockwise by `rot` first. */
+    fun loadGray(f: File, w: Int, h: Int, rot: Int = 0): ByteArray? {
+        val swap = rot == 90 || rot == 270
+        val dw = if (swap) h else w; val dh = if (swap) w else h          // size of the stored (unrotated) image we need
         val o = BitmapFactory.Options(); o.inJustDecodeBounds = true; BitmapFactory.decodeFile(f.absolutePath, o)
-        var sample = 1; while (o.outWidth / (sample * 2) >= w && o.outHeight / (sample * 2) >= h) sample *= 2
+        var sample = 1; while (o.outWidth / (sample * 2) >= dw && o.outHeight / (sample * 2) >= dh) sample *= 2
         val o2 = BitmapFactory.Options(); o2.inSampleSize = sample; o2.inPreferredConfig = Bitmap.Config.ARGB_8888
         val bm = BitmapFactory.decodeFile(f.absolutePath, o2) ?: return null
-        val scaled = if (bm.width != w || bm.height != h) Bitmap.createScaledBitmap(bm, w, h, true) else bm
-        val px = IntArray(w * h); scaled.getPixels(px, 0, w, 0, 0, w, h)
-        val out = ByteArray(w * h) { val c = px[it]; ((((c shr 16) and 255) * 77 + ((c shr 8) and 255) * 150 + (c and 255) * 29) shr 8).toByte() }
+        val scaled = if (bm.width != dw || bm.height != dh) Bitmap.createScaledBitmap(bm, dw, dh, true) else bm
+        val px = IntArray(dw * dh); scaled.getPixels(px, 0, dw, 0, 0, dw, dh)
+        val g = ByteArray(dw * dh) { val c = px[it]; ((((c shr 16) and 255) * 77 + ((c shr 8) and 255) * 150 + (c and 255) * 29) shr 8).toByte() }
         if (scaled !== bm) scaled.recycle(); bm.recycle()
+        if (rot == 0) return g
+        val out = ByteArray(w * h)
+        for (y in 0 until dh) for (x in 0 until dw) {
+            val (nx, ny) = when (rot) { 90 -> (dh - 1 - y) to x; 180 -> (dw - 1 - x) to (dh - 1 - y); else -> y to (dw - 1 - x) }
+            out[ny * w + nx] = g[y * dw + x]
+        }
         return out
     }
 

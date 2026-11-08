@@ -14,7 +14,9 @@ class Shot(val n: Int, val id: String) {
     var sent = false
     var assetId: String? = null
     var w = 0; var h = 0
-    var orientation = 1           // EXIF orientation of the stored JPEG (sensor frame -> display)
+    var orientation = 1           // EXIF orientation tag of the stored JPEG (unreliable on some phones)
+    var fileRot = 0               // clockwise rotation (0/90/180/270) that maps the stored pixels to the canonical sensor frame
+    var devRoll = 0.0             // device roll from gravity at capture (0 upright, +90 top-left, -90 top-right)
     var sharp = 0.0
     var pose: Pose? = null
     var slotKey: String? = null
@@ -39,7 +41,7 @@ class Shot(val n: Int, val id: String) {
         return JSONObject()
             .put("n", n).put("t", System.currentTimeMillis()).put("src", "photo")
             .put("file", JSONObject().put("name", "shot$n.jpg"))
-            .put("w", w).put("h", h)
+            .put("w", w).put("h", h).put("file_rot", fileRot).put("dev_roll", devRoll).put("landscape", landscape)
             .put("exif", JSONObject().put("orientation", orientation).put("exposure_ns", exposureNs).put("iso", iso)
                 .put("focus_diopters", focusDist.toDouble()).put("landscape", landscape).put("app", "android"))
             .put("ms", millis).put("sharp", sharp)
@@ -52,7 +54,8 @@ class Shot(val n: Int, val id: String) {
         fun fromJson(j: JSONObject, dir: File): Shot {
             val s = Shot(j.getInt("n"), "k" + j.getInt("n"))
             s.state = "done"; s.w = j.getInt("w"); s.h = j.getInt("h")
-            val ex = j.optJSONObject("exif"); s.orientation = ex?.optInt("orientation", 1) ?: 1; s.landscape = ex?.optBoolean("landscape", false) ?: false
+            val ex = j.optJSONObject("exif"); s.orientation = ex?.optInt("orientation", 1) ?: 1; s.landscape = j.optBoolean("landscape", ex?.optBoolean("landscape", false) ?: false)
+            s.fileRot = j.optInt("file_rot", 0); s.devRoll = j.optDouble("dev_roll", 0.0)
             s.sharp = j.optDouble("sharp", 0.0); s.millis = j.optLong("ms", 0)
             j.optJSONObject("pose")?.let { p ->
                 val rv = p.getJSONArray("rvec"); val tv = p.getJSONArray("tvec")

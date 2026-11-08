@@ -135,8 +135,8 @@ object Detector {
         }
         corners.forEach { it.release() }; ids.release()
 
-        val cc = Mat(); val cid = Mat()
-        boardDet.detectBoard(small, cc, cid)
+        val cc = Mat(); val cid = Mat(); val mc = ArrayList<Mat>(); val mid = Mat()
+        boardDet.detectBoard(small, cc, cid, mc, mid)
         var boardObs: BoardObs? = null
         if (!cid.empty() && cid.rows() >= 6) {
             val n = cid.rows()
@@ -146,10 +146,33 @@ object Detector {
             refineFull(gray, pts)
             boardObs = BoardObs(bids, pts)
         }
+        // a 4x4 "sticker" that sits on one of the board's 5x5 markers, or is far bigger than a 12 mm sticker
+        // could be at that depth, is a misread board marker (seen on a real scan as id 189 in 30 frames)
+        if (mc.isNotEmpty()) {
+            val quads = mc.map { m -> val q = FloatArray(8); for (k in 0 until 4) { val p = m.get(0, k); q[2 * k] = (p[0] / sc).toFloat(); q[2 * k + 1] = (p[1] / sc).toFloat() }; q }
+            val sides = quads.map { q -> (0 until 4).sumOf { k -> hypot((q[2 * k] - q[((k + 1) % 4) * 2]).toDouble(), (q[2 * k + 1] - q[((k + 1) % 4) * 2 + 1]).toDouble()) } / 4 }.sorted()
+            val boardSide = sides[sides.size / 2]
+            val it = stickers.iterator()
+            while (it.hasNext()) {
+                val st = it.next()
+                val cx = (st.corners[0] + st.corners[2] + st.corners[4] + st.corners[6]) / 4; val cy = (st.corners[1] + st.corners[3] + st.corners[5] + st.corners[7]) / 4
+                val side = (0 until 4).sumOf { k -> hypot((st.corners[2 * k] - st.corners[((k + 1) % 4) * 2]).toDouble(), (st.corners[2 * k + 1] - st.corners[((k + 1) % 4) * 2 + 1]).toDouble()) } / 4
+                val onMarker = quads.any { q -> insideQuad(q, cx, cy) }
+                if (onMarker || side > 1.3 * boardSide * TARGET_MM / (MARKER_M * 1000)) it.remove()
+            }
+        }
+        mc.forEach { it.release() }; mid.release()
         cc.release(); cid.release(); small.release()
 
         val pose = boardObs?.let { boardPose(it, w, h, focalGuessPx) }
         return Analysis(w, h, stickers, boardObs, sharp, pose, System.currentTimeMillis() - t0)
+    }
+
+    private fun insideQuad(q: FloatArray, x: Float, y: Float): Boolean {
+        var pos = 0; var neg = 0
+        for (k in 0 until 4) { val ax = q[2 * k]; val ay = q[2 * k + 1]; val bx = q[((k + 1) % 4) * 2]; val by = q[((k + 1) % 4) * 2 + 1]
+            val cr = (bx - ax) * (y - ay) - (by - ay) * (x - ax); if (cr >= 0) pos++ else neg++ }
+        return pos == 4 || neg == 4
     }
 
     /** Port of OpenCV cornerSubPix (gradient-orthogonality), on the full-resolution image. */

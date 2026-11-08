@@ -48,6 +48,7 @@ class CameraController(private val ctx: Context) {
     var lastIso = 0; private set
     var lastFocus = 0f; private set
     var focalPx: Double? = null; private set
+    var sensorOrientation = 90; private set
     var sensorSize: Size? = null; private set
     var locked = false; private set
 
@@ -101,6 +102,7 @@ class CameraController(private val ctx: Context) {
     private fun readCharacteristics(cam: Camera) {
         try {
             val info = Camera2CameraInfo.from(cam.cameraInfo)
+            info.getCameraCharacteristic(CameraCharacteristics.SENSOR_ORIENTATION)?.let { sensorOrientation = it }
             val fl = info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
             val ps = info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
             val px = info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)

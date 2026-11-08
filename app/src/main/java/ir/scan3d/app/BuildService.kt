@@ -51,7 +51,7 @@ class BuildService : Service() {
                     val cal = Calibrator(Detector.SQUARE_M * 1000, Detector.SQUARES_X); cal.log = ::log
                     val rolled = BooleanArray(shots.size) { shots[it].landscape }
                     val r = cal.calibrate(fr, w, h, rolled)
-                    val prof = JSONObject().put("device", Build.MODEL).put("image_size", JSONArray(listOf(w, h)))
+                    val prof = JSONObject().put("device", Build.MODEL).put("image_size", JSONArray(listOf(w, h))).put("frame", "sensor")
                         .put("f", r.camera.f).put("cx", r.camera.cx).put("cy", r.camera.cy).put("k1", r.camera.k1).put("k2", r.camera.k2)
                         .put("sigma", JSONArray(r.sigma.toList())).put("rms_px", r.rms).put("frames", r.frames).put("rolled", r.rolled)
                         .put("coverage", JSONArray(listOf(r.coverage, r.coverageCells))).put("model", r.model).put("warnings", JSONArray(r.warnings))
@@ -64,7 +64,7 @@ class BuildService : Service() {
                     val prior = store.loadProfile(shots[0].w, shots[0].h)?.let { p ->
                         val sg = p.getJSONArray("sigma")
                         CameraPrior(ir.scan3d.app.engine.Camera(p.getDouble("f"), p.getDouble("cx"), p.getDouble("cy"), p.getDouble("k1"), p.getDouble("k2")),
-                            DoubleArray(5) { maxOf(sg.getDouble(it), listOf(0.5, 0.5, 0.5, 1e-3, 3e-3)[it]) })   // never trust a prior below a sane floor
+                            DoubleArray(5) { maxOf(sg.getDouble(it), listOf(1.0, 1.5, 1.5, 2e-3, 5e-3)[it]) })   // never trust a prior below a sane floor
                     }
                     log(if (prior != null) "using camera profile as prior" else "no camera profile; self-calibrating")
                     val files = shots.map { File(dir, "shot${it.n}.jpg") }
