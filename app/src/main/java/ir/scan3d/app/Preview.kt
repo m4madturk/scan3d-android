@@ -48,7 +48,8 @@ object Preview {
         }
         for (t in 0 until n) depth[t] = (pz[m.tris[3 * t]] + pz[m.tris[3 * t + 1]] + pz[m.tris[3 * t + 2]]) / 3
         order.sortBy { depth[it] }
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG); paint.style = Paint.Style.FILL
+        // fill + 1 px stroke in the same colour: anti-aliased fills alone leave bright seams between dense triangles
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG); paint.style = Paint.Style.FILL_AND_STROKE; paint.strokeWidth = 1f; paint.strokeJoin = Paint.Join.ROUND
         val light = doubleArrayOf(0.3, -0.5, 0.8).let { val nn = sqrt(it[0] * it[0] + it[1] * it[1] + it[2] * it[2]); doubleArrayOf(it[0] / nn, it[1] / nn, it[2] / nn) }
         val path = Path()
         for (t in order) {
