@@ -11,6 +11,35 @@ class Mesh(val verts: FloatArray, val tris: IntArray) {
     val vertexCount get() = verts.size / 3
     val triangleCount get() = tris.size / 3
 
+    /**
+     * Taubin smoothing (lambda/mu): removes the voxel staircase of marching cubes without shrinking the
+     * model the way plain Laplacian smoothing does. Vertices on the base plane (z = minimum) stay put.
+     */
+    fun taubin(iterations: Int = 10, lambda: Float = 0.5f, mu: Float = -0.53f): Mesh {
+        val n = vertexCount
+        val adj = Array(n) { IntArray(0) }
+        run {
+            val lists = Array(n) { ArrayList<Int>(6) }
+            for (t in 0 until triangleCount) { val a = tris[3 * t]; val b = tris[3 * t + 1]; val c = tris[3 * t + 2]
+                lists[a].add(b); lists[a].add(c); lists[b].add(a); lists[b].add(c); lists[c].add(a); lists[c].add(b) }
+            for (i in 0 until n) adj[i] = lists[i].distinct().toIntArray()
+        }
+        var zmin = Float.MAX_VALUE; for (i in 0 until n) zmin = minOf(zmin, verts[3 * i + 2])
+        val fixed = BooleanArray(n) { verts[3 * it + 2] < zmin + 1e-4f }
+        var cur = verts.copyOf(); var nxt = FloatArray(verts.size)
+        for (it in 0 until iterations) for (factor in floatArrayOf(lambda, mu)) {
+            for (i in 0 until n) {
+                if (fixed[i] || adj[i].isEmpty()) { nxt[3 * i] = cur[3 * i]; nxt[3 * i + 1] = cur[3 * i + 1]; nxt[3 * i + 2] = cur[3 * i + 2]; continue }
+                var sx = 0f; var sy = 0f; var sz = 0f
+                for (j in adj[i]) { sx += cur[3 * j]; sy += cur[3 * j + 1]; sz += cur[3 * j + 2] }
+                val k = adj[i].size
+                nxt[3 * i] = cur[3 * i] + factor * (sx / k - cur[3 * i]); nxt[3 * i + 1] = cur[3 * i + 1] + factor * (sy / k - cur[3 * i + 1]); nxt[3 * i + 2] = cur[3 * i + 2] + factor * (sz / k - cur[3 * i + 2])
+            }
+            val tmp = cur; cur = nxt; nxt = tmp
+        }
+        return Mesh(cur, tris)
+    }
+
     fun bounds(): Array<DoubleArray> {
         val lo = DoubleArray(3) { Double.MAX_VALUE }; val hi = DoubleArray(3) { -Double.MAX_VALUE }
         for (i in 0 until vertexCount) for (k in 0 until 3) { val v = verts[3 * i + k].toDouble(); if (v < lo[k]) lo[k] = v; if (v > hi[k]) hi[k] = v }

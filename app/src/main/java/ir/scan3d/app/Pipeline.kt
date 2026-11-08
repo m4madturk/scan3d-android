@@ -141,7 +141,7 @@ object Pipeline {
         val skirt = Carve.removeSkirt(g, 4.5)
         if (skirt > 0) log("removed base skirt: $skirt thin columns (< 4.5 mm)")
         progress("ساخت مش…", 0.92)
-        val mesh = MarchingCubes.run(g)
+        val mesh = MarchingCubes.run(g).taubin(12)        // take the voxel staircase off; volume preserved
         val bb = mesh.bounds()
         val centred = mesh.translated((-(bb[0][0] + bb[1][0]) / 2).toFloat(), (-(bb[0][1] + bb[1][1]) / 2).toFloat(), (-bb[0][2]).toFloat())
         val size = DoubleArray(3) { bb[1][it] - bb[0][it] }

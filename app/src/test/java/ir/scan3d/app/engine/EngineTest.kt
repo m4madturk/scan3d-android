@@ -204,6 +204,12 @@ class EngineTest {
         val out = ByteArrayOutputStream(); mesh.writeStl(out)
         assertEquals(84 + 50 * mesh.triangleCount, out.size())
 
+        // smoothing must not shrink or grow the model
+        val sm = mesh.taubin(12); val sb = sm.bounds()
+        println("taubin: volume %.1f -> %.1f cm3, size %.1f x %.1f x %.1f".format(mesh.volume() / 1000, sm.volume() / 1000, sb[1][0] - sb[0][0], sb[1][1] - sb[0][1], sb[1][2] - sb[0][2]))
+        assertEquals(mesh.volume(), sm.volume(), 0.01 * mesh.volume())
+        assertEquals(bb[1][2] - bb[0][2], sb[1][2] - sb[0][2], 0.3)
+
         // robust fusion: one deliberately wrong silhouette (empty mask) must not destroy the object when 2 votes are required
         val bad = SilView(W, H, BooleanArray(W * H), cam, views[0].pose)
         val views2 = views + bad
