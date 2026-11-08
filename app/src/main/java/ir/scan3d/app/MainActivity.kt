@@ -54,6 +54,15 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private var torch = false
     @Volatile private var livePose: Pose? = null
     private var demoPose: Pose? = null
+    // IMU: elevation from gravity, heading from the rotation vector (anchored to the board's azimuth when it is seen)
+    @Volatile private var gravEl: Double? = null
+    @Volatile private var gravRoll = 0.0
+    @Volatile private var yaw: Double? = null
+    private var azOffset: Double? = null
+    private var lastDistMm: Double? = null
+    private var poseFromBoard = false
+    private var azKnown = false
+    private val rotM = FloatArray(9)
     private var lastHint = 0L
     private var orientationListener: android.view.OrientationEventListener? = null
     private val fa = { n: Int -> Ui.fa(n) }
@@ -117,14 +126,53 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             }
         }
         orientationListener?.enable()
-        (getSystemService(SENSOR_SERVICE) as SensorManager).let { sm -> sm.getDefaultSensor(Sensor.TYPE_GYROSCOPE)?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) } }
+        (getSystemService(SENSOR_SERVICE) as SensorManager).let { sm ->
+            sm.getDefaultSensor(Sensor.TYPE_GYROSCOPE)?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
+            sm.getDefaultSensor(Sensor.TYPE_GRAVITY)?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
+            (sm.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR) ?: sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR))?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
+        }
         b.profile.text = store.profileSummary()?.let { getString(R.string.profile_fmt, it) } ?: getString(R.string.no_profile)
         refresh()
         demoPose?.let { dp -> livePose = dp; b.guide.live = GuideView.PhonePose(dp.az, dp.el, dp.dist * 1000, dp.roll, 0.0, 0.0, if (mode == "calib") 0.0 else 15.0); b.guide.liveFresh = true; updateHint() }
     }
 
     override fun onPause() { super.onPause(); orientationListener?.disable(); (getSystemService(SENSOR_SERVICE) as SensorManager).unregisterListener(this) }
-    override fun onSensorChanged(e: SensorEvent) { gyroRate = sqrt(e.values[0] * e.values[0] + e.values[1] * e.values[1] + e.values[2] * e.values[2]) }
+    override fun onSensorChanged(e: SensorEvent) {
+        when (e.sensor.type) {
+            Sensor.TYPE_GYROSCOPE -> gyroRate = sqrt(e.values[0] * e.values[0] + e.values[1] * e.values[1] + e.values[2] * e.values[2])
+            Sensor.TYPE_GRAVITY -> {
+                // camera looks along -Z of the device; its angle below the horizon = asin(g_z / |g|)
+                val n = sqrt(e.values[0] * e.values[0] + e.values[1] * e.values[1] + e.values[2] * e.values[2]); if (n < 1e-3) return
+                gravEl = Math.toDegrees(Math.asin((e.values[2] / n).toDouble().coerceIn(-1.0, 1.0)))
+                gravRoll = Math.toDegrees(Math.atan2(e.values[0].toDouble(), e.values[1].toDouble()))
+            }
+            Sensor.TYPE_GAME_ROTATION_VECTOR, Sensor.TYPE_ROTATION_VECTOR -> {
+                SensorManager.getRotationMatrixFromVector(rotM, e.values)
+                // camera axis (device -Z) in world coordinates = -(third column); heading = atan2(east, north)
+                yaw = Math.toDegrees(Math.atan2(-rotM[2].toDouble(), -rotM[5].toDouble()))
+            }
+        }
+    }
+
+    /**
+     * Live pose for the guide. The board gives the exact pose and teaches us the heading offset; without
+     * the board we still know elevation (gravity), azimuth (heading + offset) and roughly the distance
+     * (sticker size), so "higher / lower / closer" keeps working while the user moves.
+     */
+    private fun fuse(board: Pose?, stickerPx: Double?, fPrev: Double?): Pose? {
+        if (board != null) {
+            yaw?.let { azOffset = ((board.az - it) % 360 + 360) % 360 }
+            lastDistMm = board.dist * 1000; poseFromBoard = true; azKnown = true
+            return board
+        }
+        poseFromBoard = false
+        val el = gravEl ?: return null
+        val az = yaw?.let { y -> azOffset?.let { (((y + it) % 360) + 360) % 360 } }
+        azKnown = az != null
+        val dist = if (stickerPx != null && stickerPx > 8 && fPrev != null) fPrev * Detector.TARGET_MM / stickerPx else lastDistMm
+        if (dist != null) lastDistMm = dist
+        return Pose(az ?: (b.guide.target?.az ?: 180.0), el, (dist ?: 320.0) / 1000, DoubleArray(3), DoubleArray(3), gravRoll)
+    }
     override fun onAccuracyChanged(s: Sensor?, a: Int) {}
 
     private fun startCamera() { cam.start(this, b.preview, ::analyzePreview) { b.status.text = getString(R.string.ready) } }
@@ -146,16 +194,16 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             val lv = Detector.live(up, fPrev)
             val ids = lv.ids; val nBoard = lv.nBoard
             val boardOk = nBoard >= 6
-            livePose = demoPose ?: lv.pose
+            livePose = demoPose ?: fuse(lv.pose, lv.stickerSidePx, fPrev)
             val still = gyroRate < 0.08f
             stillFrames = if (still) stillFrames + 1 else 0
             runOnUiThread {
                 b.overlay.boardOk = boardOk
                 val lp = livePose
-                b.live.text = if (lp != null) getString(R.string.live_pose_fmt, fa(ids.size), clockOf(lp.az), fa(lp.el.toInt()), fa((lp.dist * 100).toInt()), if (still) "●" else "○")
+                b.live.text = if (lp != null) getString(R.string.live_pose_fmt, fa(ids.size), if (azKnown || demoPose != null) clockOf(lp.az) else "؟", fa(lp.el.toInt()), fa((lp.dist * 100).toInt()), (if (still) "●" else "○") + (if (poseFromBoard || demoPose != null) "" else " ~"))
                               else getString(R.string.live_fmt, fa(ids.size), fa(nBoard), if (still) "●" else "○")
                 b.guide.live = lp?.let { GuideView.PhonePose(it.az, it.el, it.dist * 1000, it.roll, 0.0, 0.0, if (mode == "calib") 0.0 else 15.0) }
-                b.guide.liveFresh = lp != null
+                b.guide.liveFresh = lp != null && (poseFromBoard || azKnown || demoPose != null)
                 if (System.currentTimeMillis() - lastHint > 400) { lastHint = System.currentTimeMillis(); updateHint() }
                 if (boardOk && !autoLockDone && mode == "scan" && !cam.locked && stillFrames > 15) {
                     // first steady framing of the board: lock exposure/WB/focus so every shot shares one camera
@@ -201,6 +249,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 gray.release()
                 shot.stickers = a.stickers; shot.board = a.board; shot.sharp = a.sharpness; shot.millis = a.millis
                 shot.pose = a.pose; shot.slotKey = s.slotOf(a.pose)
+                a.pose?.let { p -> yaw?.let { azOffset = ((p.az - it) % 360 + 360) % 360; azKnown = true } }
                 shot.state = "done"
                 Session.markRolled(s.shots)                              // "rolled" = roll differs ~90 deg from the majority
                 val opts = BitmapFactory.Options().apply { inSampleSize = 16 }
@@ -345,11 +394,13 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val rollNow = abs(((lp.roll + 90) % 180 + 180) % 180 - 90)          // 0 upright .. 90 sideways
         val wantRoll = abs(t.roll) > 45
         val parts = ArrayList<String>()
-        if (abs(daz) > 15 && t.el < 80) parts += (if (daz > 0) getString(R.string.move_left) else getString(R.string.move_right)) + " " + fa(abs(daz).toInt()) + "°"
+        val azOk = azKnown || demoPose != null
+        if (azOk && abs(daz) > 15 && t.el < 80) parts += (if (daz > 0) getString(R.string.move_left) else getString(R.string.move_right)) + " " + fa(abs(daz).toInt()) + "°"
         if (abs(del) > 8) parts += if (del > 0) getString(R.string.move_up) else getString(R.string.move_down)
         if (abs(dd) > 70) parts += if (dd > 0) getString(R.string.move_back) else getString(R.string.move_closer)
         if (wantRoll && rollNow < 45) parts += getString(R.string.move_roll)
         if (!wantRoll && rollNow > 45 && mode == "calib") parts += getString(R.string.move_unroll)
+        if (!azOk) parts += getString(R.string.hint_need_board_once)
         b.next.text = base + "\n" + (if (parts.isEmpty()) getString(R.string.hint_ok) else "← " + parts.joinToString("، "))
     }
 

@@ -40,7 +40,7 @@ data class BoardObs(val ids: IntArray, val pts: FloatArray)
 data class Pose(val az: Double, val el: Double, val dist: Double, val rvec: DoubleArray, val tvec: DoubleArray, val roll: Double = 0.0)
 
 /** Live preview result: sticker ids, number of board corners and (if the board is seen) the pose. */
-data class Live(val ids: List<Int>, val nBoard: Int, val pose: Pose?)
+data class Live(val ids: List<Int>, val nBoard: Int, val pose: Pose?, val stickerSidePx: Double? = null)
 
 data class Analysis(
     val width: Int, val height: Int,
@@ -74,24 +74,37 @@ object Detector {
     /** Fast pass for the live preview (gray, already small). Returns sticker ids and board corner count. */
     fun quick(gray: Mat): Pair<List<Int>, Int> { val l = live(gray, null); return l.ids to l.nBoard }
 
-    /** Preview-resolution detection plus a quick board pose (approximate focal length, no distortion). */
+    /**
+     * Preview-resolution detection plus a quick board pose (approximate focal length, no distortion).
+     * The board is detected on a half-size image (fast, its 18 mm markers stay large enough); the 12 mm
+     * stickers on the full preview. stickerSidePx = median sticker side, for a rough distance when the
+     * board is out of view.
+     */
     fun live(gray: Mat, focalPx: Double?): Live {
         val corners = ArrayList<Mat>(); val ids = Mat()
         targetDet.detectMarkers(gray, corners, ids)
         val idList = ArrayList<Int>()
         if (!ids.empty()) for (i in 0 until ids.rows()) idList.add(ids.get(i, 0)[0].toInt())
+        val sides = ArrayList<Double>()
+        for (c in corners) {
+            val v = FloatArray(8); c.get(0, 0, v)
+            var sum = 0.0; for (k in 0 until 4) { val a = k * 2; val b = ((k + 1) % 4) * 2; sum += hypot((v[a] - v[b]).toDouble(), (v[a + 1] - v[b + 1]).toDouble()) }
+            sides.add(sum / 4)
+        }
         corners.forEach { it.release() }; ids.release()
+        val stickerSide = if (sides.isEmpty()) null else sides.sorted()[sides.size / 2]
+        val small = Mat(); Imgproc.resize(gray, small, Size(), 0.5, 0.5, Imgproc.INTER_AREA)
         val cc = Mat(); val cid = Mat()
-        boardDet.detectBoard(gray, cc, cid)
+        boardDet.detectBoard(small, cc, cid)
         val nBoard = if (cid.empty()) 0 else cid.rows()
         var pose: Pose? = null
         if (nBoard >= 6) {
             val bids = IntArray(nBoard) { cid.get(it, 0)[0].toInt() }
-            val pts = FloatArray(2 * nBoard); for (i in 0 until nBoard) { val v = cc.get(i, 0); pts[2 * i] = v[0].toFloat(); pts[2 * i + 1] = v[1].toFloat() }
+            val pts = FloatArray(2 * nBoard); for (i in 0 until nBoard) { val v = cc.get(i, 0); pts[2 * i] = (2 * v[0] + 0.5).toFloat(); pts[2 * i + 1] = (2 * v[1] + 0.5).toFloat() }
             pose = try { boardPose(BoardObs(bids, pts), gray.cols(), gray.rows(), focalPx) } catch (_: Exception) { null }
         }
-        cc.release(); cid.release()
-        return Live(idList, nBoard, pose)
+        cc.release(); cid.release(); small.release()
+        return Live(idList, nBoard, pose, stickerSide)
     }
 
     /** Full analysis of a captured frame (gray, full resolution). */

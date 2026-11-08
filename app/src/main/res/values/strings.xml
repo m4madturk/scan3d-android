@@ -70,6 +70,7 @@
     <string name="help">؟</string>
     <string name="live_pose_fmt">%5$s مارکر %1$s | ساعت %2$s | ارتفاع %3$s درجه | فاصله %4$s سانت</string>
     <string name="hint_no_board">صفحه‌ی ChArUco رو کامل توی کادر بیار تا موقعیت گوشی رو ببینم.</string>
+    <string name="hint_need_board_once">یک‌بار صفحه رو کامل توی کادر بیار تا جهت (ساعت) رو یاد بگیرم</string>
     <string name="hint_ok">خوبه، همین‌جا ثابت نگه دار و عکس بگیر.</string>
     <string name="move_left">به چپ بچرخ</string>
     <string name="move_right">به راست بچرخ</string>
