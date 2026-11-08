@@ -1,5 +1,6 @@
 package ir.scan3d.app.engine
 
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -35,22 +36,41 @@ object Silhouette {
         }
         // erode validity so the paper edge is not flagged
         val valid2 = erode(valid, w, h, 4)
-        // photographed levels of printed black and white (medians)
+        // photographed levels of printed black and white: LOCAL medians on a coarse grid, so a window on one
+        // side of the room (brighter squares there) does not get flagged as object; global medians as fallback
         val blacks = ArrayList<Int>(); val whites = ArrayList<Int>()
         for (i in 0 until w * h step 7) if (valid2[i]) { val e = expected[i].toInt() and 255; val g = gray[i].toInt() and 255; if (e < 128) blacks.add(g) else whites.add(g) }
         if (blacks.size < 50 || whites.size < 50) return null
-        val lo = median(blacks); val hi = median(whites)
-        // predicted level, with +-3 px tolerance to misregistration: pixel fits if it is between min and max of the neighbourhood prediction
+        val gLo = median(blacks); val gHi = median(whites)
+        val cells = 6; val cw = (w + cells - 1) / cells; val ch = (h + cells - 1) / cells
+        val cellLo = IntArray(cells * cells) { gLo }; val cellHi = IntArray(cells * cells) { gHi }
+        run {
+            val cb = Array(cells * cells) { ArrayList<Int>() }; val cwh = Array(cells * cells) { ArrayList<Int>() }
+            for (v in 0 until h step 3) for (u in 0 until w step 3) { val i = v * w + u; if (!valid2[i]) continue
+                val e = expected[i].toInt() and 255; val g = gray[i].toInt() and 255; val c = (v / ch) * cells + (u / cw)
+                if (e < 128) cb[c].add(g) else cwh[c].add(g) }
+            for (c in 0 until cells * cells) { if (cb[c].size >= 40) cellLo[c] = median(cb[c]); if (cwh[c].size >= 40) cellHi[c] = median(cwh[c]) }
+            // cells without enough samples borrow from the nearest filled neighbour (one pass is enough at this size)
+            for (c in 0 until cells * cells) if (cb[c].size < 40 || cwh[c].size < 40) {
+                var best = -1; var bd = Int.MAX_VALUE
+                for (d in 0 until cells * cells) if (cb[d].size >= 40 && cwh[d].size >= 40) { val dd = abs(d / cells - c / cells) + abs(d % cells - c % cells); if (dd < bd) { bd = dd; best = d } }
+                if (best >= 0) { cellLo[c] = cellLo[best]; cellHi[c] = cellHi[best] }
+            }
+        }
+        // predicted level per pixel from its cell, with +-3 px tolerance to misregistration; threshold relative to the local contrast
+        val pred = IntArray(w * h); val thr = IntArray(w * h)
+        for (v in 0 until h) for (u in 0 until w) { val c = (v / ch) * cells + (u / cw); val lo = cellLo[c]; val hi = cellHi[c]
+            pred[v * w + u] = lo + ((hi - lo) * ((expected[v * w + u].toInt() and 255) / 255.0)).toInt()
+            thr[v * w + u] = max(22, min(thresh, (0.33 * (hi - lo)).toInt())) }
         val predLo = IntArray(w * h); val predHi = IntArray(w * h)
-        val pred = IntArray(w * h) { lo + ((hi - lo) * ((expected[it].toInt() and 255) / 255.0)).toInt() }
         for (v in 0 until h) for (u in 0 until w) {
             var mn = Int.MAX_VALUE; var mx = Int.MIN_VALUE
             for (dv in -3..3) { val vv = v + dv; if (vv < 0 || vv >= h) continue; for (du in -3..3) { val uu = u + du; if (uu < 0 || uu >= w) continue; val p = pred[vv * w + uu]; if (p < mn) mn = p; if (p > mx) mx = p } }
             predLo[v * w + u] = mn; predHi[v * w + u] = mx
         }
-        var raw = BooleanArray(w * h) { i -> valid2[i] && run { val g = gray[i].toInt() and 255; g > predHi[i] + thresh || g < predLo[i] - thresh } }
+        var raw = BooleanArray(w * h) { i -> valid2[i] && run { val g = gray[i].toInt() and 255; g > predHi[i] + thr[i] || g < predLo[i] - thr[i] } }
         raw = open(raw, w, h, 2)
-        var closed = close(raw, w, h, max(7, (0.038 * min(w, h)).toInt()))
+        var closed = close(raw, w, h, max(5, (0.02 * min(w, h)).toInt()))
         if (aiMask != null) { val dil = dilate(aiMask, w, h, 2); for (i in closed.indices) closed[i] = closed[i] && dil[i] }
         val comp = largestComponent(closed, w, h) ?: return null
         val filled = fillHoles(comp, w, h)

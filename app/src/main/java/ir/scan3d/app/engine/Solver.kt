@@ -46,10 +46,16 @@ class Solver(private val squareMm: Double, private val squaresX: Int = 7, privat
         // ---- initial camera and poses ------------------------------------------------------
         var cam = prior?.camera?.copy() ?: Camera(0.85 * maxOf(w, h), w / 2.0, h / 2.0, 0.0, 0.0)
         val poses = HashMap<Int, Pose6>()
+        var lastGood: Pose6? = null
+        val failed = ArrayList<Int>()
         for (fr in framework) {
             val obj = fr.boardIds.map { boardPoint(it) }; val img = (0 until fr.boardIds.size).map { doubleArrayOf(fr.boardPx[2 * it], fr.boardPx[2 * it + 1]) }
-            Pnp.solve(obj, img, cam)?.let { poses[fr.index] = it }
+            var p = Pnp.solve(obj, img, cam)
+            // the homography init can fail on noisy data: fall back to refining from the last good pose
+            if ((p == null || Pnp.rms(obj, img, cam, p) > 25.0) && lastGood != null) { val q = Pnp.solve(obj, img, cam, lastGood); if (q != null && (p == null || Pnp.rms(obj, img, cam, q) < Pnp.rms(obj, img, cam, p))) p = q }
+            if (p != null && Pnp.rms(obj, img, cam, p) < 25.0) { poses[fr.index] = p; lastGood = p } else failed.add(fr.index)
         }
+        if (failed.isNotEmpty()) log("board pose failed for frames ${failed.map { it + 1 }}")
         val fw = framework.filter { poses.containsKey(it.index) }
         require(fw.size >= 2) { "fewer than 2 frames with a usable board pose" }
         if (prior == null) {
@@ -71,7 +77,7 @@ class Solver(private val squareMm: Double, private val squaresX: Int = 7, privat
         val X = HashMap<Int, Vec3>()
         for (id in stickerIds) triangulate(centreObs[id]!!, poses, cam)?.let { X[id] = it }
         val ids = stickerIds.filter { X.containsKey(it) }
-        log("framework ${fw.size} frames, ${ids.size} stickers")
+        log("framework ${fw.size} frames, ${ids.size} stickers (seen in >= $minViews frames; all detected ids: ${centreObs.keys.sorted()})")
 
         // ---- bundle adjustment ------------------------------------------------------------
         val fIdx = fw.mapIndexed { i, f -> f.index to i }.toMap()
@@ -131,6 +137,7 @@ class Solver(private val squareMm: Double, private val squaresX: Int = 7, privat
             results.add(StickerResult(id, seen.size, c, sig[i], corners, edges, n))
         }
         val edgeBias = if (edgeN > 0) edgeSum / edgeN - targetMm else Double.NaN
+        for (r in results) log("sticker ${r.id}: ${r.views} views, height above board %.1f mm, sigma %.2f mm".format(-r.centre.z, r.sigma.maxOrNull() ?: Double.NaN))
 
         // ---- other frames (video): localise against the frozen framework ------------------
         val allPoses = arrayOfNulls<Pose6>(frames.size)

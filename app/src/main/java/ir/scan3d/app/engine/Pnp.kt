@@ -20,18 +20,30 @@ object Pnp {
     }
 
     private fun planarInit(obj: List<Vec3>, img: List<DoubleArray>, cam: Camera): Pose6? {
-        // normalised, undistorted image coordinates
+        // normalised, undistorted image coordinates; both point sets Hartley-normalised (centroid 0, mean radius sqrt 2)
+        // so the 9x9 normal matrix is well conditioned on real data (mm-scale board vs unit-scale image)
         val n = obj.size
+        val und = Array(n) { cam.undistort(img[it][0], img[it][1]) }
+        var mx = 0.0; var my = 0.0; var ux = 0.0; var uy = 0.0
+        for (i in 0 until n) { mx += obj[i].x; my += obj[i].y; ux += und[i][0]; uy += und[i][1] }
+        mx /= n; my /= n; ux /= n; uy /= n
+        var dObj = 0.0; var dImg = 0.0
+        for (i in 0 until n) { dObj += Math.hypot(obj[i].x - mx, obj[i].y - my); dImg += Math.hypot(und[i][0] - ux, und[i][1] - uy) }
+        val sObj = sqrt(2.0) / (dObj / n).coerceAtLeast(1e-9); val sImg = sqrt(2.0) / (dImg / n).coerceAtLeast(1e-9)
         val A = Array(2 * n) { DoubleArray(9) }
         for (i in 0 until n) {
-            val (xn, yn) = cam.undistort(img[i][0], img[i][1]).let { it[0] to it[1] }
-            val X = obj[i].x; val Y = obj[i].y
+            val X = (obj[i].x - mx) * sObj; val Y = (obj[i].y - my) * sObj
+            val xn = (und[i][0] - ux) * sImg; val yn = (und[i][1] - uy) * sImg
             A[2 * i] = doubleArrayOf(-X, -Y, -1.0, 0.0, 0.0, 0.0, xn * X, xn * Y, xn)
             A[2 * i + 1] = doubleArrayOf(0.0, 0.0, 0.0, -X, -Y, -1.0, yn * X, yn * Y, yn)
         }
-        val h = nullVector(A) ?: return null
-        // H = [h1 h2 h3] maps (X, Y, 1) -> normalised; columns r1, r2, t up to scale
-        val h1 = Vec3(h[0], h[3], h[6]); val h2 = Vec3(h[1], h[4], h[7]); val h3 = Vec3(h[2], h[5], h[8])
+        val hn = nullVector(A) ?: return null
+        // denormalise: H = Timg^-1 * Hn * Tobj
+        val Hn = arrayOf(doubleArrayOf(hn[0], hn[1], hn[2]), doubleArrayOf(hn[3], hn[4], hn[5]), doubleArrayOf(hn[6], hn[7], hn[8]))
+        val Tobj = arrayOf(doubleArrayOf(sObj, 0.0, -sObj * mx), doubleArrayOf(0.0, sObj, -sObj * my), doubleArrayOf(0.0, 0.0, 1.0))
+        val TimgInv = arrayOf(doubleArrayOf(1 / sImg, 0.0, ux), doubleArrayOf(0.0, 1 / sImg, uy), doubleArrayOf(0.0, 0.0, 1.0))
+        val H = mul(TimgInv, mul(Hn, Tobj))
+        val h1 = Vec3(H[0][0], H[1][0], H[2][0]); val h2 = Vec3(H[0][1], H[1][1], H[2][1]); val h3 = Vec3(H[0][2], H[1][2], H[2][2])
         var s = 2.0 / (h1.norm() + h2.norm())
         if (h3.z * s < 0) s = -s                       // board must be in front of the camera
         val r1 = h1 * s; val r2 = h2 * s; val t = h3 * s
@@ -41,22 +53,30 @@ object Pnp {
         return Pose6(Rot.toVec(R), t.toArray())
     }
 
-    /** Smallest right singular vector of A via power iteration on (A^T A)^-1 (shifted inverse iteration). */
+    private fun mul(a: Array<DoubleArray>, b: Array<DoubleArray>): Array<DoubleArray> = Array(3) { i -> DoubleArray(3) { j -> a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j] } }
+
+    /** Eigenvector of the smallest eigenvalue of A^T A (cyclic Jacobi on the 9x9 symmetric matrix; always converges). */
     private fun nullVector(A: Array<DoubleArray>): DoubleArray? {
         val n = 9
         val M = Array(n) { DoubleArray(n) }
         for (row in A) for (i in 0 until n) for (j in 0 until n) M[i][j] += row[i] * row[j]
-        // shift slightly to keep it positive definite, then inverse iteration
-        var tr = 0.0; for (i in 0 until n) tr += M[i][i]
-        val eps = tr * 1e-10 + 1e-12
-        for (i in 0 until n) M[i][i] += eps
-        var v = DoubleArray(n) { 1.0 / sqrt(n.toDouble()) }
-        for (it in 0 until 60) {
-            val w = Linear.choleskySolve(M, v) ?: return null
-            var nn = 0.0; for (x in w) nn += x * x
-            nn = sqrt(nn); if (nn == 0.0) return null
-            for (i in 0 until n) v[i] = w[i] / nn
+        val V = Array(n) { i -> DoubleArray(n) { j -> if (i == j) 1.0 else 0.0 } }
+        for (sweep in 0 until 60) {
+            var off = 0.0; for (i in 0 until n) for (j in i + 1 until n) off += M[i][j] * M[i][j]
+            if (off < 1e-24) break
+            for (p in 0 until n) for (q in p + 1 until n) {
+                if (abs(M[p][q]) < 1e-300) continue
+                val theta = (M[q][q] - M[p][p]) / (2 * M[p][q])
+                val tt = (if (theta >= 0) 1.0 else -1.0) / (abs(theta) + sqrt(theta * theta + 1))
+                val c = 1 / sqrt(tt * tt + 1); val sn = tt * c
+                for (k in 0 until n) { val mkp = M[k][p]; val mkq = M[k][q]; M[k][p] = c * mkp - sn * mkq; M[k][q] = sn * mkp + c * mkq }
+                for (k in 0 until n) { val mpk = M[p][k]; val mqk = M[q][k]; M[p][k] = c * mpk - sn * mqk; M[q][k] = sn * mpk + c * mqk }
+                for (k in 0 until n) { val vkp = V[k][p]; val vkq = V[k][q]; V[k][p] = c * vkp - sn * vkq; V[k][q] = sn * vkp + c * vkq }
+            }
         }
+        var best = 0; for (i in 1 until n) if (M[i][i] < M[best][best]) best = i
+        val v = DoubleArray(n) { V[it][best] }
+        var nn = 0.0; for (x in v) nn += x * x; if (nn == 0.0 || nn.isNaN()) return null
         return v
     }
 

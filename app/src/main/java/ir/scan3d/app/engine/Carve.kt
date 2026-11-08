@@ -111,6 +111,22 @@ object Carve {
     }
 
     /** Bounds (z-up, mm) of the negative region of a coarse grid, padded. */
+    /**
+     * Removes the thin "skirt" that the object's shadow leaves on the board plane (all views see the shadow
+     * as foreground, so carving keeps a 1-2 voxel plate around the base): any (x, y) column whose solid
+     * part is lower than minHeightMm is cleared. Returns the number of cleared columns.
+     */
+    fun removeSkirt(g: Grid, minHeightMm: Double): Int {
+        var cleared = 0
+        for (i in 0 until g.nx) for (j in 0 until g.ny) {
+            var top = -1
+            for (k in g.nz - 1 downTo 0) if (g.f[g.idx(i, j, k)] < 0) { top = k; break }
+            if (top < 0) continue
+            if ((top + 1) * g.voxel < minHeightMm) { for (k in 0..top) g.f[g.idx(i, j, k)] = (g.voxel * 0.5).toFloat(); cleared++ }
+        }
+        return cleared
+    }
+
     /** Diagnostics: per view, which fraction of the sampled volume projects inside its silhouette. */
     fun insideFractions(views: List<SilView>, bounds: Array<DoubleArray>, step: Double): DoubleArray {
         val out = DoubleArray(views.size)

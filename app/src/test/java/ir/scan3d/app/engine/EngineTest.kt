@@ -42,6 +42,24 @@ class EngineTest {
     }
 
     @Test
+    fun planarPnpSurvivesNoiseAndRoughCamera() {
+        // real photos: ~1.5 px corner noise, and a camera guess that is 15 % off; every frame must still get a pose
+        val (frames, _, j) = loadScan()
+        val cam = j.getJSONObject("camera")
+        val rough = Camera(cam.getDouble("f") * 1.15, 2000.0, 1500.0, 0.0, 0.0)
+        val rnd = java.util.Random(7)
+        var ok = 0
+        for (fr in frames) {
+            val obj = fr.boardIds.map { Vec3(((it % 6) + 1) * 25.0, ((it / 6) + 1) * 25.0, 0.0) }
+            val img = (0 until fr.boardIds.size).map { doubleArrayOf(fr.boardPx[2 * it] + 1.5 * rnd.nextGaussian(), fr.boardPx[2 * it + 1] + 1.5 * rnd.nextGaussian()) }
+            val p = Pnp.solve(obj, img, rough)
+            if (p != null && Pnp.rms(obj, img, rough, p) < 25.0) ok++
+        }
+        println("pnp: $ok / ${frames.size} frames posed with noise + rough camera")
+        assertEquals(frames.size, ok)
+    }
+
+    @Test
     fun solverRecoversCameraAndStickerCentres() {
         val (frames, truth, j) = loadScan()
         val solver = Solver(25.0); solver.log = { println(it) }
