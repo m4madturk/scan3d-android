@@ -61,7 +61,7 @@ object Pipeline {
      * resting on z = 0, report).
      */
     fun build(shots: List<Shot>, files: List<File>, convex: Boolean, prior: CameraPrior?, voxel: Double,
-              progress: (String, Double) -> Unit, log: (String) -> Unit): Pair<Mesh, Report> {
+              progress: (String, Double) -> Unit, log: (String) -> Unit, segmenter: Segmenter? = null): Pair<Mesh, Report> {
         val t0 = System.currentTimeMillis()
         val done = shots.indices.filter { shots[it].state == "done" && shots[it].board != null }
         require(done.size >= 2) { "fewer than 2 shots with the board" }
@@ -101,10 +101,12 @@ object Pipeline {
                     val cw = min(sw, (cx + rad).toInt()) - x0; val chh = min(sh, (cy + rad).toInt()) - y0
                     val am = if (cw > 20 && chh > 20) segmenter.maskCrop(gray, sw, sh, x0, y0, cw, chh) else null
                     if (am != null) {
-                        val frac = am.count { it }.toDouble() / (cw * chh)
+                        var nOn = 0; for (b in am) if (b) nOn++
+                        val frac = nOn.toDouble() / (cw * chh)
                         val labels = Silhouette.components(am, sw, sh)
                         val keep = uv.mapNotNull { p -> val u = p[0].toInt(); val v = p[1].toInt(); if (u in 0 until sw && v in 0 until sh && labels[v * sw + u] != 0) labels[v * sw + u] else null }.toSet()
-                        val allIn = keep.size > 0 && uv.all { p -> val u = p[0].toInt(); val v = p[1].toInt(); u in 0 until sw && v in 0 until sh && am[v * sw + u] }
+                        var allIn = keep.isNotEmpty()
+                        for (p in uv) { val u = p[0].toInt(); val v = p[1].toInt(); if (!(u in 0 until sw && v in 0 until sh && am[v * sw + u])) allIn = false }
                         if (frac in 0.02..0.6 && allIn) {
                             val kept = BooleanArray(sw * sh) { labels[it] in keep }
                             val dil = Silhouette.dilate(kept, sw, sh, 2)
