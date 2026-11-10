@@ -6,17 +6,59 @@ import kotlin.math.min
 import kotlin.math.sqrt
 
 /**
+ * Maps image pixels to positions on the printed sheet: undistortion, ray, intersection with the (possibly bent)
+ * sheet. Allocation-free; used per pixel by the silhouette and per sample by the contour refinement.
+ */
+class SheetProjector(private val cam: Camera, pose: Pose6, private val warp: SheetWarp?) {
+    private val R = pose.R()
+    val centre: Vec3 = pose.centre()
+    private val bent = warp != null && !warp.isFlat()
+
+    /** Board position (mm) seen at pixel (u, v) -> out[0], out[1]; false when the ray misses the sheet plane. */
+    fun hit(u: Double, v: Double, out: DoubleArray): Boolean {
+        val xd = (u - cam.cx) / cam.f; val yd = (v - cam.cy) / cam.f
+        var x = xd; var y = yd
+        for (i in 0 until 10) { val r2 = x * x + y * y; val d = 1 + cam.k1 * r2 + cam.k2 * r2 * r2; x = xd / d; y = yd / d }
+        val dx = R[0][0] * x + R[1][0] * y + R[2][0]; val dy = R[0][1] * x + R[1][1] * y + R[2][1]; val dz = R[0][2] * x + R[1][2] * y + R[2][2]
+        if (dz == 0.0) return false
+        var s = -centre.z / dz
+        if (s <= 0) return false
+        var bx = centre.x + s * dx; var by = centre.y + s * dy
+        if (bent) for (i in 0 until 2) {                    // the sheet is at board z = -height: two fixed-point steps are plenty
+            s = (-warp!!.height(bx, by) - centre.z) / dz; bx = centre.x + s * dx; by = centre.y + s * dy
+        }
+        out[0] = bx; out[1] = by
+        return true
+    }
+}
+
+/**
  * Object silhouette by comparing the photo with the printed board as the solved camera would see
- * it (port of silhouette.board_silhouette with pose). Pure Kotlin on a gray byte image.
- * Steps: render expected board (white/black, with the ArUco payloads treated as "either"),
- * map printed levels to photographed levels, flag pixels that fit neither nearby level,
- * morphological clean-up, largest component, hole filling.
+ * it. Pure Kotlin on a gray byte image.
  */
 object Silhouette {
-    class Result(val mask: BooleanArray, val solidity: Double, val area: Int)
+    /** Local black / white levels of the photographed board (a coarse grid over the image). */
+    class Levels(val cells: Int, val cw: Int, val ch: Int, val lo: IntArray, val hi: IntArray) {
+        fun cell(u: Int, v: Int) = (v / ch).coerceIn(0, cells - 1) * cells + (u / cw).coerceIn(0, cells - 1)
+    }
+
+    /**
+     * mask: inside or unknown (NOT verified board); valid: pixels that look at the printed area;
+     * levels: null when there were too few verified pixels to estimate them.
+     */
+    class Result(val mask: BooleanArray, val solidity: Double, val area: Int, val valid: BooleanArray, val levels: Levels?)
 
     /** boardImage: the printed board as a gray byte image at pxPerMm resolution (0 = black). */
-    class BoardTemplate(val img: ByteArray, val w: Int, val h: Int, val pxPerMm: Double)
+    class BoardTemplate(val img: ByteArray, val w: Int, val h: Int, val pxPerMm: Double) {
+        /** Printed value (0..255) at board position (x, y) mm, bilinear; -1 outside the print. */
+        fun sample(x: Double, y: Double): Float {
+            val fx = x * pxPerMm - 0.5; val fy = y * pxPerMm - 0.5
+            if (fx < 0 || fy < 0 || fx >= w - 1 || fy >= h - 1) return -1f
+            val x0 = fx.toInt(); val y0 = fy.toInt(); val ax = (fx - x0).toFloat(); val ay = (fy - y0).toFloat(); val o = y0 * w + x0
+            val a = (img[o].toInt() and 255); val b = (img[o + 1].toInt() and 255); val c = (img[o + w].toInt() and 255); val d = (img[o + w + 1].toInt() and 255)
+            return (a * (1 - ax) + b * ax) * (1 - ay) + (c * (1 - ax) + d * ax) * ay
+        }
+    }
 
     /**
      * Three-state classification against the rendered board:
@@ -27,23 +69,33 @@ object Silhouette {
      *  - UNKNOWN: plain square interiors and everything outside the board (a white object on a white square
      *    looks like the square). Unknown counts as "inside" for carving: other views decide.
      * The returned mask is "inside or unknown" = NOT sure board; the visual hull intersection does the rest.
+     * warp: the estimated bend of the sheet, so the render lands where the photo shows the print.
      */
-    fun extract(gray: ByteArray, w: Int, h: Int, cam: Camera, pose: Pose6, tpl: BoardTemplate, thresh: Int = 55, aiMask: BooleanArray? = null): Result? {
-        val R = pose.R(); val t = pose.t
-        val C = pose.centre()
-        // expected board image and validity, per pixel, via the ray-plane intersection
+    fun extract(gray: ByteArray, w: Int, h: Int, cam: Camera, pose: Pose6, tpl: BoardTemplate, thresh: Int = 55, aiMask: BooleanArray? = null, warp: SheetWarp? = null): Result? {
+        val proj = SheetProjector(cam, pose, warp)
+        val C = proj.centre
+        // expected board image and validity per pixel. The pixel -> sheet mapping is smooth, so it is computed
+        // exactly on a coarse lattice (every 8 px) and interpolated in between: 30x fewer ray intersections.
         val expected = ByteArray(w * h); val valid = BooleanArray(w * h)
-        var sqPx = 0.0; var sqN = 0
-        for (v in 0 until h) for (u in 0 until w) {
-            val n = cam.undistort(u.toDouble(), v.toDouble())
-            val dx = R[0][0] * n[0] + R[1][0] * n[1] + R[2][0]; val dy = R[0][1] * n[0] + R[1][1] * n[1] + R[2][1]; val dz = R[0][2] * n[0] + R[1][2] * n[1] + R[2][2]
-            if (dz == 0.0) continue
-            val s = -C.z / dz
-            if (s <= 0) continue
-            val X = C.x + s * dx; val Y = C.y + s * dy
-            val tx = (X * tpl.pxPerMm).toInt(); val ty = (Y * tpl.pxPerMm).toInt()
-            if (tx < 0 || ty < 0 || tx >= tpl.w || ty >= tpl.h) continue
-            expected[v * w + u] = tpl.img[ty * tpl.w + tx]; valid[v * w + u] = true
+        val lat = 8; val gw = (w - 1) / lat + 2; val gh = (h - 1) / lat + 2
+        val gx = DoubleArray(gw * gh); val gy = DoubleArray(gw * gh); val gok = BooleanArray(gw * gh)
+        val hit = DoubleArray(2)
+        for (j in 0 until gh) for (i in 0 until gw) if (proj.hit((i * lat).toDouble(), (j * lat).toDouble(), hit)) { gx[j * gw + i] = hit[0]; gy[j * gw + i] = hit[1]; gok[j * gw + i] = true }
+        val ppm = tpl.pxPerMm
+        for (v in 0 until h) {
+            val j = v / lat; val fv = (v - j * lat) / lat.toDouble()
+            for (u in 0 until w) {
+                val i = u / lat; val o = j * gw + i
+                val bx: Double; val by: Double
+                if (gok[o] && gok[o + 1] && gok[o + gw] && gok[o + gw + 1]) {
+                    val fu = (u - i * lat) / lat.toDouble()
+                    bx = (gx[o] * (1 - fu) + gx[o + 1] * fu) * (1 - fv) + (gx[o + gw] * (1 - fu) + gx[o + gw + 1] * fu) * fv
+                    by = (gy[o] * (1 - fu) + gy[o + 1] * fu) * (1 - fv) + (gy[o + gw] * (1 - fu) + gy[o + gw + 1] * fu) * fv
+                } else { if (!proj.hit(u.toDouble(), v.toDouble(), hit)) continue; bx = hit[0]; by = hit[1] }
+                val tx = (bx * ppm).toInt(); val ty = (by * ppm).toInt()
+                if (bx < 0 || by < 0 || tx >= tpl.w || ty >= tpl.h) continue
+                expected[v * w + u] = tpl.img[ty * tpl.w + tx]; valid[v * w + u] = true
+            }
         }
         val valid2 = erode(valid, w, h, 4)
         var nValid = 0; for (b in valid2) if (b) nValid++
@@ -76,6 +128,7 @@ object Silhouette {
         val never = BooleanArray(w * h)                      // pixels proven to be object by the level test (AI may not override)
 
         // ---- level test for the parts the structure cannot judge (object over a plain square) ----
+        var levels: Levels? = null
         val blacks = ArrayList<Int>(); val whites = ArrayList<Int>()
         for (i in 0 until w * h step 7) if (valid2[i]) { val ev = expected[i].toInt() and 255; val gv = gray[i].toInt() and 255; if (ev < 128) blacks.add(gv) else whites.add(gv) }
         if (blacks.size >= 50 && whites.size >= 50) {
@@ -92,6 +145,7 @@ object Silhouette {
                 for (d in 0 until cells * cells) if (cb[d].size >= 40 && cwh[d].size >= 40) { val dd = abs(d / cells - c / cells) + abs(d % cells - c % cells); if (dd < bd) { bd = dd; best = d } }
                 if (best >= 0) { cellLo[c] = cellLo[best]; cellHi[c] = cellHi[best] }
             }
+            levels = Levels(cells, cw, ch, cellLo, cellHi)
             val pred = IntArray(w * h); val thr = IntArray(w * h)
             for (v in 0 until h) for (u in 0 until w) { val c = (v / ch) * cells + (u / cw); val lo = cellLo[c]; val hi = cellHi[c]
                 pred[v * w + u] = lo + ((hi - lo) * ((expected[v * w + u].toInt() and 255) / 255.0)).toInt()
@@ -111,7 +165,7 @@ object Silhouette {
         val inside = BooleanArray(w * h) { !sure[it] }
         var nSure = 0; for (b in sure) if (b) nSure++
         var area = 0; for (i in 0 until w * h) if (valid2[i] && inside[i]) area++
-        return Result(inside, nSure.toDouble() / nValid, area)
+        return Result(inside, nSure.toDouble() / nValid, area, valid2, levels)
     }
 
     /** Gaussian blur approximated by three successive box blurs (O(1) per pixel regardless of sigma). */

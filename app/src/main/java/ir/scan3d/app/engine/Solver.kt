@@ -19,6 +19,10 @@ class SolveResult(
     val sigma0: Double, val rmsBoard: Double, val rmsStickers: Double,
     val rejectedBoard: Int, val rejectedStickers: Int, val frameworkFrames: Int,
     val edgeBiasMm: Double, val warnings: List<String>, val corr: Array<DoubleArray>?,
+    /** Estimated bend of the printed sheet (flat when it could not be estimated) and the 1-sigma of its coefficients (mm). */
+    val warp: SheetWarp, val warpSigma: DoubleArray?,
+    /** Board reprojection RMS of every input frame (px; NaN where the frame has no pose). */
+    val frameRms: DoubleArray,
 )
 
 /**
@@ -27,12 +31,18 @@ class SolveResult(
  *   - unknowns: camera (5), one pose per framework frame (6 each), one centre per sticker (3 each)
  *   - sparse Levenberg-Marquardt with Huber loss and Schur complement over the sticker block
  *   - 3-sigma rejection in up to three rounds, then covariance for precision and correlations
+ *   - the sheet is NOT assumed flat: with 6 or more frames a quadratic bend (3 parameters, weak zero prior) is
+ *     estimated along with everything else. On a real scan (paper on a carpet) the bend was 2.5 mm
+ *     peak-to-valley and modelling it cut the board residual from 1.5 to 1.1 px.
  * Board frame: x, y in mm on the board, z into the board.
  */
-class Solver(private val squareMm: Double, private val squaresX: Int = 7, private val targetMm: Double = 12.0) {
+class Solver(private val squareMm: Double, private val squaresX: Int = 7, private val targetMm: Double = 12.0, private val squaresY: Int = 10) {
     var log: (String) -> Unit = {}
+    /** Estimate the sheet bend (needs at least [WARP_MIN_FRAMES] frames). */
+    var estimateWarp = true
 
     fun boardPoint(id: Int): Vec3 = Vec3(((id % (squaresX - 1)) + 1) * squareMm, ((id / (squaresX - 1)) + 1) * squareMm, 0.0)
+    fun boardPoint(id: Int, warp: SheetWarp): Vec3 = warp.lift(boardPoint(id))
 
     private class Obs(val frame: Int, val pointIdx: Int, val fixed: Vec3?, val u: Double, val v: Double) { var active = true }
 
@@ -87,7 +97,9 @@ class Solver(private val squareMm: Double, private val squaresX: Int = 7, privat
             for (i in fr.boardIds.indices) obs.add(Obs(fIdx[fr.index]!!, -1, boardPoint(fr.boardIds[i]), fr.boardPx[2 * i], fr.boardPx[2 * i + 1]))
             for ((id, c) in fr.stickers) { val si = sIdx[id] ?: continue; val ctr = diagonalCentre(c, cam) ?: continue; obs.add(Obs(fIdx[fr.index]!!, si, null, ctr[0], ctr[1])) }
         }
-        val state = State(cam.copy(), fw.map { poses[it.index]!!.copy() }.toTypedArray(), ids.map { X[it]!! }.toTypedArray())
+        val nW = if (estimateWarp && fw.size >= WARP_MIN_FRAMES) 3 else 0
+        val state = State(cam.copy(), fw.map { poses[it.index]!!.copy() }.toTypedArray(), ids.map { X[it]!! }.toTypedArray(),
+            SheetWarp.flat(squaresX * squareMm, squaresY * squareMm), nW)
         var sigma0 = 1.0
         var rejB = 0; var rejS = 0
         for (round in 0 until 3) {
@@ -105,17 +117,21 @@ class Solver(private val squareMm: Double, private val squaresX: Int = 7, privat
         val rmsB = if (cb > 0) sqrt(sb / cb) else Double.NaN; val rmsS = if (cs > 0) sqrt(ss / cs) else Double.NaN
 
         // ---- covariance (full dense, fine for our sizes) ----------------------------------
-        val nP = 5 + 6 * state.poses.size + 3 * state.pts.size
         val (JtJ, _) = normalEquations(state, obs, prior)
         val cov = Linear.inverseSpd(JtJ)
         val sig = Array(state.pts.size) { DoubleArray(3) { Double.NaN } }
         var corr: Array<DoubleArray>? = null
+        var warpSigma: DoubleArray? = null
         if (cov != null) {
+            if (nW > 0) { val b = 5 + 6 * state.poses.size + 3 * state.pts.size; warpSigma = DoubleArray(3) { sqrt(maxOf(0.0, cov[b + it][b + it])) * sigma0 } }
             for (i in state.pts.indices) { val b = 5 + 6 * state.poses.size + 3 * i; for (k in 0 until 3) sig[i][k] = sqrt(maxOf(0.0, cov[b + k][b + k]) ) * sigma0 }
             corr = Array(5) { a -> DoubleArray(5) { b -> cov[a][b] / sqrt(maxOf(1e-30, cov[a][a] * cov[b][b])) } }
             for (a in 0 until 5) for (b in a + 1 until 5) if (abs(corr[a][b]) > 0.95) warnings.add("intrinsics ${NAMES[a]}/${NAMES[b]} correlation %.2f: add rotated and closer tilted photos".format(corr[a][b]))
         }
         if (photos.isNotEmpty() && fw.size < 8) warnings.add("only ${fw.size} framework photos; 12-30 recommended")
+        if (nW > 0) log("sheet bend: %.2f mm peak-to-valley (coefficients %.2f %.2f %.2f mm, sigma %s)".format(state.warp.peakToValley(), state.warp.k[0], state.warp.k[1], state.warp.k[2],
+            warpSigma?.joinToString(" ") { "%.2f".format(it) } ?: "-"))
+        else log("sheet bend not estimated (${fw.size} frames < $WARP_MIN_FRAMES): assuming a flat sheet")
 
         // ---- corners for normals and blur diagnostic -----------------------------------------
         val camC = state.poses.map { it.centre() }
@@ -145,19 +161,32 @@ class Solver(private val squareMm: Double, private val squaresX: Int = 7, privat
         val centres = ids.mapIndexed { i, id -> id to state.pts[i] }.toMap()
         for (fr in frames) if (allPoses[fr.index] == null && fr.boardIds.size >= 6) {
             val obj = ArrayList<Vec3>(); val img = ArrayList<DoubleArray>()
-            for (i in fr.boardIds.indices) { obj.add(boardPoint(fr.boardIds[i])); img.add(doubleArrayOf(fr.boardPx[2 * i], fr.boardPx[2 * i + 1])) }
+            for (i in fr.boardIds.indices) { obj.add(boardPoint(fr.boardIds[i], state.warp)); img.add(doubleArrayOf(fr.boardPx[2 * i], fr.boardPx[2 * i + 1])) }
             for ((id, c) in fr.stickers) { val p = centres[id] ?: continue; val ctr = diagonalCentre(c, state.cam) ?: continue; obj.add(p); img.add(ctr) }
-            allPoses[fr.index] = Pnp.solve(obj, img, state.cam)
+            // start from the planar solution, then refine on the bent sheet + stickers
+            val flat = fr.boardIds.map { boardPoint(it) }; val flatImg = img.subList(0, flat.size)
+            allPoses[fr.index] = Pnp.solve(flat, flatImg, state.cam)?.let { Pnp.refine(obj, img, state.cam, it, 20) }
         }
-        return SolveResult(state.cam, allPoses, results, sigma0, rmsB, rmsS, rejB, rejS, fw.size, edgeBias, warnings, corr)
+        val frameRms = DoubleArray(frames.size) { Double.NaN }
+        for (fr in frames) { val p = allPoses[fr.index] ?: continue
+            var ss = 0.0; var n = 0
+            for (i in fr.boardIds.indices) { val pr = state.cam.project(p.toCamera(boardPoint(fr.boardIds[i], state.warp))) ?: continue
+                val du = pr[0] - fr.boardPx[2 * i]; val dv = pr[1] - fr.boardPx[2 * i + 1]; ss += du * du + dv * dv; n++ }
+            if (n > 0) frameRms[fr.index] = sqrt(ss / n) }
+        return SolveResult(state.cam, allPoses, results, sigma0, rmsB, rmsS, rejB, rejS, fw.size, edgeBias, warnings, corr, state.warp, warpSigma, frameRms)
     }
 
     // ------------------------------------------------------------------ internals
-    private class State(var cam: Camera, val poses: Array<Pose6>, val pts: Array<Vec3>)
+    /** nW = number of sheet-bend parameters in the state vector (0 = flat sheet, 3 = quadratic bend). */
+    private class State(var cam: Camera, val poses: Array<Pose6>, val pts: Array<Vec3>, val warp: SheetWarp, val nW: Int) {
+        val size get() = 5 + 6 * poses.size + 3 * pts.size + nW
+        val warpBase get() = 5 + 6 * poses.size + 3 * pts.size
+    }
+
+    private fun point(s: State, o: Obs): Vec3 = if (o.fixed != null) (if (s.nW > 0) s.warp.lift(o.fixed) else o.fixed) else s.pts[o.pointIdx]
 
     private fun resid(s: State, o: Obs): DoubleArray? {
-        val p = o.fixed ?: s.pts[o.pointIdx]
-        val pr = s.cam.project(s.poses[o.frame].toCamera(p)) ?: return null
+        val pr = s.cam.project(s.poses[o.frame].toCamera(point(s, o))) ?: return null
         return doubleArrayOf(pr[0] - o.u, pr[1] - o.v)
     }
 
@@ -165,7 +194,7 @@ class Solver(private val squareMm: Double, private val squaresX: Int = 7, privat
 
     /** Full normal equations (dense). Returns (JtJ, Jtr) with Huber weights and prior rows. */
     private fun normalEquations(s: State, obs: List<Obs>, prior: CameraPrior?): Pair<Array<DoubleArray>, DoubleArray> {
-        val nF = s.poses.size; val nX = s.pts.size; val n = 5 + 6 * nF + 3 * nX
+        val nF = s.poses.size; val nX = s.pts.size; val n = s.size
         val A = Array(n) { DoubleArray(n) }; val g = DoubleArray(n)
         val d = 1e-6
         for (o in obs) {
@@ -173,14 +202,22 @@ class Solver(private val squareMm: Double, private val squaresX: Int = 7, privat
             val r0 = resid(s, o) ?: continue
             val rn = sqrt(r0[0] * r0[0] + r0[1] * r0[1]); val wgt = huberW(rn, 1.0)
             val cols = ArrayList<Int>(); val J = ArrayList<DoubleArray>()   // column index, (dr/dp for u, v)
+            val pw = point(s, o)
+            val pc = s.poses[o.frame].toCamera(pw)
             // camera
             for (k in 0 until 5) { val c = s.cam.copy(); when (k) { 0 -> c.f += d; 1 -> c.cx += d; 2 -> c.cy += d; 3 -> c.k1 += d; else -> c.k2 += d }
-                val pr = c.project(s.poses[o.frame].toCamera(o.fixed ?: s.pts[o.pointIdx])) ?: continue
+                val pr = c.project(pc) ?: continue
                 cols.add(k); J.add(doubleArrayOf((pr[0] - o.u - r0[0]) / d, (pr[1] - o.v - r0[1]) / d)) }
             // pose
             for (k in 0 until 6) { val q = s.poses[o.frame].copy(); if (k < 3) q.r[k] += d else q.t[k - 3] += d
-                val pr = s.cam.project(q.toCamera(o.fixed ?: s.pts[o.pointIdx])) ?: continue
+                val pr = s.cam.project(q.toCamera(pw)) ?: continue
                 cols.add(5 + 6 * o.frame + k); J.add(doubleArrayOf((pr[0] - o.u - r0[0]) / d, (pr[1] - o.v - r0[1]) / d)) }
+            // sheet bend (board corners only): the corner moves along the board normal
+            if (o.fixed != null && s.nW > 0) for (k in 0 until s.nW) {
+                val keep = s.warp.k[k]; s.warp.k[k] = keep + 1e-4
+                val pr = s.cam.project(s.poses[o.frame].toCamera(s.warp.lift(o.fixed))); s.warp.k[k] = keep
+                if (pr == null) continue
+                cols.add(s.warpBase + k); J.add(doubleArrayOf((pr[0] - o.u - r0[0]) / 1e-4, (pr[1] - o.v - r0[1]) / 1e-4)) }
             // point
             if (o.fixed == null) for (k in 0 until 3) { val p = s.pts[o.pointIdx]; val q = Vec3(p.x, p.y, p.z); when (k) { 0 -> q.x += d; 1 -> q.y += d; else -> q.z += d }
                 val pr = s.cam.project(s.poses[o.frame].toCamera(q)) ?: continue
@@ -195,6 +232,8 @@ class Solver(private val squareMm: Double, private val squaresX: Int = 7, privat
             val v = pr.camera.toArray(); val cur = s.cam.toArray()
             for (k in 0 until 5) { val sg = pr.sigma[k]; if (sg > 0) { A[k][k] += 1 / (sg * sg); g[k] += (cur[k] - v[k]) / (sg * sg) } }
         }
+        // weak zero prior on the bend: keeps it at "flat" when the views cannot tell
+        for (k in 0 until s.nW) { val b = s.warpBase + k; A[b][b] += 1 / (WARP_PRIOR_MM * WARP_PRIOR_MM); g[b] += s.warp.k[k] / (WARP_PRIOR_MM * WARP_PRIOR_MM) }
         return A to g
     }
 
@@ -202,6 +241,7 @@ class Solver(private val squareMm: Double, private val squaresX: Int = 7, privat
         var c = 0.0
         for (o in obs) if (o.active) { val r = resid(s, o) ?: return Double.MAX_VALUE; val rn = sqrt(r[0] * r[0] + r[1] * r[1]); c += if (rn <= 1.0) rn * rn else 2 * rn - 1 }
         prior?.let { pr -> val v = pr.camera.toArray(); val cur = s.cam.toArray(); for (k in 0 until 5) if (pr.sigma[k] > 0) { val z = (cur[k] - v[k]) / pr.sigma[k]; c += z * z } }
+        for (k in 0 until s.nW) { val z = s.warp.k[k] / WARP_PRIOR_MM; c += z * z }
         return c
     }
 
@@ -216,7 +256,8 @@ class Solver(private val squareMm: Double, private val squaresX: Int = 7, privat
                 val n = g.size
                 val Aug = Array(n) { i -> DoubleArray(n) { j -> A[i][j] + if (i == j) lambda * (1 + A[i][i]) else 0.0 } }
                 val dx = Linear.choleskySolve(Aug, DoubleArray(n) { -g[it] }) ?: break
-                val trial = State(s.cam.copy(), Array(s.poses.size) { s.poses[it].copy() }, Array(s.pts.size) { Vec3(s.pts[it].x, s.pts[it].y, s.pts[it].z) })
+                val trial = State(s.cam.copy(), Array(s.poses.size) { s.poses[it].copy() }, Array(s.pts.size) { Vec3(s.pts[it].x, s.pts[it].y, s.pts[it].z) }, s.warp.copy(), s.nW)
+                for (k in 0 until s.nW) trial.warp.k[k] += dx[s.warpBase + k]
                 trial.cam.f += dx[0]; trial.cam.cx += dx[1]; trial.cam.cy += dx[2]; trial.cam.k1 += dx[3]; trial.cam.k2 += dx[4]
                 for (f in s.poses.indices) for (k in 0 until 3) { trial.poses[f].r[k] += dx[5 + 6 * f + k]; trial.poses[f].t[k] += dx[5 + 6 * f + 3 + k] }
                 for (p in s.pts.indices) { val b = 5 + 6 * s.poses.size + 3 * p; trial.pts[p].x += dx[b]; trial.pts[p].y += dx[b + 1]; trial.pts[p].z += dx[b + 2] }
@@ -224,6 +265,7 @@ class Solver(private val squareMm: Double, private val squaresX: Int = 7, privat
                 if (c1 < c0) {
                     s.cam = trial.cam; for (f in s.poses.indices) { s.poses[f].r.indices.forEach { k -> s.poses[f].r[k] = trial.poses[f].r[k]; s.poses[f].t[k] = trial.poses[f].t[k] } }
                     for (p in s.pts.indices) { s.pts[p].x = trial.pts[p].x; s.pts[p].y = trial.pts[p].y; s.pts[p].z = trial.pts[p].z }
+                    for (k in 0 until s.nW) s.warp.k[k] = trial.warp.k[k]
                     val rel = (c0 - c1) / maxOf(c0, 1e-12); c0 = c1; lambda = maxOf(lambda / 3, 1e-9); improved = true
                     if (rel < 1e-8) return sigma0(s, obs)
                     break
@@ -237,7 +279,7 @@ class Solver(private val squareMm: Double, private val squaresX: Int = 7, privat
     private fun sigma0(s: State, obs: List<Obs>): Double {
         var ss = 0.0; var n = 0
         for (o in obs) if (o.active) { val r = resid(s, o) ?: continue; ss += r[0] * r[0] + r[1] * r[1]; n += 2 }
-        val dof = maxOf(1, n - (5 + 6 * s.poses.size + 3 * s.pts.size))
+        val dof = maxOf(1, n - s.size)
         return sqrt(ss / dof)
     }
 
@@ -311,7 +353,11 @@ class Solver(private val squareMm: Double, private val squaresX: Int = 7, privat
         return Vec3(v[0] / v[3], v[1] / v[3], v[2] / v[3])
     }
 
-    companion object { val NAMES = arrayOf("f", "cx", "cy", "k1", "k2") }
+    companion object {
+        val NAMES = arrayOf("f", "cx", "cy", "k1", "k2")
+        const val WARP_MIN_FRAMES = 6
+        const val WARP_PRIOR_MM = 15.0
+    }
 }
 
 /** Camera profile used as a weighted prior (from a calibration session). */

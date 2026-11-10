@@ -6,54 +6,112 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.abs
 
+/** Growable primitive buffers and a primitive hash map: meshes have millions of entries, boxing them is slow. */
+class FloatBuf(cap: Int = 1024) {
+    var a = FloatArray(cap); var n = 0
+    fun add(v: Float) { if (n == a.size) a = a.copyOf(n * 2); a[n++] = v }
+    fun toArray(): FloatArray = a.copyOf(n)
+}
+
+class IntBuf(cap: Int = 1024) {
+    var a = IntArray(cap); var n = 0
+    fun add(v: Int) { if (n == a.size) a = a.copyOf(n * 2); a[n++] = v }
+    fun toArray(): IntArray = a.copyOf(n)
+}
+
+/** Open-addressing map from non-negative Long keys to Int values (no removal). */
+class LongIntMap(cap: Int = 1 shl 12) {
+    private var keys = LongArray(cap) { -1L }; private var vals = IntArray(cap); private var size = 0; private var mask = cap - 1
+    private fun slot(k: Long): Int { var h = k * -0x61c8864680b583ebL; h = h xor (h ushr 32); return h.toInt() and mask }
+    fun get(k: Long): Int { var i = slot(k); while (true) { val q = keys[i]; if (q == k) return vals[i]; if (q == -1L) return -1; i = (i + 1) and mask } }
+    fun put(k: Long, v: Int) {
+        if (size * 2 >= keys.size) grow()
+        var i = slot(k); while (true) { val q = keys[i]; if (q == -1L) { keys[i] = k; vals[i] = v; size++; return }; if (q == k) { vals[i] = v; return }; i = (i + 1) and mask }
+    }
+    private fun grow() {
+        val ok = keys; val ov = vals
+        keys = LongArray(ok.size * 2) { -1L }; vals = IntArray(ok.size * 2); mask = keys.size - 1; size = 0
+        for (i in ok.indices) if (ok[i] != -1L) put(ok[i], ov[i])
+    }
+}
+
 /** Indexed triangle mesh in mm. */
 class Mesh(val verts: FloatArray, val tris: IntArray) {
     val vertexCount get() = verts.size / 3
     val triangleCount get() = tris.size / 3
 
+    /** Merges coincident vertices (so neighbourhoods are real) and drops degenerate triangles. */
+    fun welded(): Mesh {
+        val map = LongIntMap(1 shl 16)
+        val remap = IntArray(vertexCount)
+        val nv = FloatBuf(verts.size)
+        for (i in 0 until vertexCount) {
+            val x = Math.round(verts[3 * i] * 2000f).toLong(); val y = Math.round(verts[3 * i + 1] * 2000f).toLong(); val z = Math.round(verts[3 * i + 2] * 2000f).toLong()
+            val key = (x and 0x1FFFFF) or ((y and 0x1FFFFF) shl 21) or ((z and 0x1FFFFF) shl 42)
+            var id = map.get(key)
+            if (id < 0) { id = nv.n / 3; nv.add(verts[3 * i]); nv.add(verts[3 * i + 1]); nv.add(verts[3 * i + 2]); map.put(key, id) }
+            remap[i] = id
+        }
+        val nt = IntBuf(tris.size)
+        for (t in 0 until triangleCount) { val a = remap[tris[3 * t]]; val b = remap[tris[3 * t + 1]]; val c = remap[tris[3 * t + 2]]; if (a != b && b != c && a != c) { nt.add(a); nt.add(b); nt.add(c) } }
+        return Mesh(nv.toArray(), nt.toArray())
+    }
+
+    /**
+     * Keeps only the largest connected piece (by triangle count). Carving leaves small floating blobs where a
+     * few views could not see; they would print as loose crumbs. Call on a welded mesh.
+     */
+    fun largestComponent(): Mesh {
+        val n = vertexCount; if (n == 0) return this
+        val parent = IntArray(n) { it }
+        fun find(a: Int): Int { var r = a; while (parent[r] != r) r = parent[r]; var c = a; while (parent[c] != r) { val nx = parent[c]; parent[c] = r; c = nx }; return r }
+        for (t in 0 until triangleCount) { val a = find(tris[3 * t]); val b = find(tris[3 * t + 1]); val c = find(tris[3 * t + 2]); if (a != b) parent[b] = a; val a2 = find(a); if (c != a2) parent[c] = a2 }
+        val count = IntArray(n)
+        for (t in 0 until triangleCount) count[find(tris[3 * t])]++
+        var best = 0; for (i in 1 until n) if (count[i] > count[best]) best = i
+        if (count[best] == triangleCount) return this
+        val remap = IntArray(n) { -1 }; val nv = FloatBuf(verts.size); val nt = IntBuf(tris.size)
+        for (t in 0 until triangleCount) {
+            if (find(tris[3 * t]) != best) continue
+            for (m in 0 until 3) { val v = tris[3 * t + m]
+                if (remap[v] < 0) { remap[v] = nv.n / 3; nv.add(verts[3 * v]); nv.add(verts[3 * v + 1]); nv.add(verts[3 * v + 2]) }
+                nt.add(remap[v]) }
+        }
+        return Mesh(nv.toArray(), nt.toArray())
+    }
+
     /**
      * Taubin smoothing (lambda/mu): removes the voxel staircase of marching cubes without shrinking the
      * model the way plain Laplacian smoothing does. Vertices on the base plane (z = minimum) stay put.
      */
-    /** Merges coincident vertices (marching cubes emits per-triangle vertices) so neighbourhoods are real. */
-    fun welded(): Mesh {
-        val map = HashMap<Long, Int>(vertexCount)
-        val remap = IntArray(vertexCount)
-        val nv = ArrayList<Float>(vertexCount * 3)
-        for (i in 0 until vertexCount) {
-            val x = Math.round(verts[3 * i] * 2000f).toLong(); val y = Math.round(verts[3 * i + 1] * 2000f).toLong(); val z = Math.round(verts[3 * i + 2] * 2000f).toLong()
-            val key = (x and 0x1FFFFF) or ((y and 0x1FFFFF) shl 21) or ((z and 0x1FFFFF) shl 42)
-            val id = map.getOrPut(key) { nv.add(verts[3 * i]); nv.add(verts[3 * i + 1]); nv.add(verts[3 * i + 2]); nv.size / 3 - 1 }
-            remap[i] = id
-        }
-        val nt = ArrayList<Int>(tris.size)
-        for (t in 0 until triangleCount) { val a = remap[tris[3 * t]]; val b = remap[tris[3 * t + 1]]; val c = remap[tris[3 * t + 2]]; if (a != b && b != c && a != c) { nt.add(a); nt.add(b); nt.add(c) } }
-        return Mesh(nv.toFloatArray(), nt.toIntArray())
-    }
-
-    fun taubin(iterations: Int = 10, lambda: Float = 0.5f, mu: Float = -0.53f): Mesh {
-        val welded = welded()
-        return welded.taubinWelded(iterations, lambda, mu)
-    }
+    fun taubin(iterations: Int = 10, lambda: Float = 0.5f, mu: Float = -0.53f): Mesh = welded().taubinWelded(iterations, lambda, mu)
 
     private fun taubinWelded(iterations: Int, lambda: Float, mu: Float): Mesh {
         val n = vertexCount
-        val adj = Array(n) { IntArray(0) }
-        run {
-            val lists = Array(n) { ArrayList<Int>(6) }
-            for (t in 0 until triangleCount) { val a = tris[3 * t]; val b = tris[3 * t + 1]; val c = tris[3 * t + 2]
-                lists[a].add(b); lists[a].add(c); lists[b].add(a); lists[b].add(c); lists[c].add(a); lists[c].add(b) }
-            for (i in 0 until n) adj[i] = lists[i].distinct().toIntArray()
+        // adjacency in compressed form: neighbours of i are adj[start[i] until start[i + 1]] (duplicates are harmless twice-weighted
+        // only if not removed, so they are removed)
+        val deg = IntArray(n + 1)
+        for (t in 0 until triangleCount) { deg[tris[3 * t]] += 2; deg[tris[3 * t + 1]] += 2; deg[tris[3 * t + 2]] += 2 }
+        val start = IntArray(n + 1); for (i in 0 until n) start[i + 1] = start[i] + deg[i]
+        val fill = start.copyOf(); val adj = IntArray(start[n])
+        for (t in 0 until triangleCount) { val a = tris[3 * t]; val b = tris[3 * t + 1]; val c = tris[3 * t + 2]
+            adj[fill[a]++] = b; adj[fill[a]++] = c; adj[fill[b]++] = a; adj[fill[b]++] = c; adj[fill[c]++] = a; adj[fill[c]++] = b }
+        val end = IntArray(n)
+        for (i in 0 until n) {                       // sort + unique each neighbour list in place
+            java.util.Arrays.sort(adj, start[i], start[i + 1])
+            var w = start[i]
+            for (r in start[i] until start[i + 1]) if (r == start[i] || adj[r] != adj[r - 1]) adj[w++] = adj[r]
+            end[i] = w
         }
         var zmin = Float.MAX_VALUE; for (i in 0 until n) zmin = minOf(zmin, verts[3 * i + 2])
         val fixed = BooleanArray(n) { verts[3 * it + 2] < zmin + 1e-4f }
         var cur = verts.copyOf(); var nxt = FloatArray(verts.size)
         for (it in 0 until iterations) for (factor in floatArrayOf(lambda, mu)) {
             for (i in 0 until n) {
-                if (fixed[i] || adj[i].isEmpty()) { nxt[3 * i] = cur[3 * i]; nxt[3 * i + 1] = cur[3 * i + 1]; nxt[3 * i + 2] = cur[3 * i + 2]; continue }
+                val k = end[i] - start[i]
+                if (fixed[i] || k == 0) { nxt[3 * i] = cur[3 * i]; nxt[3 * i + 1] = cur[3 * i + 1]; nxt[3 * i + 2] = cur[3 * i + 2]; continue }
                 var sx = 0f; var sy = 0f; var sz = 0f
-                for (j in adj[i]) { sx += cur[3 * j]; sy += cur[3 * j + 1]; sz += cur[3 * j + 2] }
-                val k = adj[i].size
+                for (q in start[i] until end[i]) { val j = adj[q]; sx += cur[3 * j]; sy += cur[3 * j + 1]; sz += cur[3 * j + 2] }
                 nxt[3 * i] = cur[3 * i] + factor * (sx / k - cur[3 * i]); nxt[3 * i + 1] = cur[3 * i + 1] + factor * (sy / k - cur[3 * i + 1]); nxt[3 * i + 2] = cur[3 * i + 2] + factor * (sz / k - cur[3 * i + 2])
             }
             val tmp = cur; cur = nxt; nxt = tmp
@@ -72,7 +130,10 @@ class Mesh(val verts: FloatArray, val tris: IntArray) {
         var v = 0.0
         for (t in 0 until triangleCount) {
             val a = tris[3 * t] * 3; val b = tris[3 * t + 1] * 3; val c = tris[3 * t + 2] * 3
-            v += (verts[a] * (verts[b + 1] * verts[c + 2] - verts[b + 2] * verts[c + 1]) - verts[a + 1] * (verts[b] * verts[c + 2] - verts[b + 2] * verts[c]) + verts[a + 2] * (verts[b] * verts[c + 1] - verts[b + 1] * verts[c])) / 6.0
+            val ax = verts[a].toDouble(); val ay = verts[a + 1].toDouble(); val az = verts[a + 2].toDouble()
+            val bx = verts[b].toDouble(); val by = verts[b + 1].toDouble(); val bz = verts[b + 2].toDouble()
+            val cx = verts[c].toDouble(); val cy = verts[c + 1].toDouble(); val cz = verts[c + 2].toDouble()
+            v += (ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx)) / 6.0
         }
         return v
     }
@@ -81,6 +142,9 @@ class Mesh(val verts: FloatArray, val tris: IntArray) {
         val v = verts.copyOf(); for (i in 0 until vertexCount) { v[3 * i] += dx; v[3 * i + 1] += dy; v[3 * i + 2] += dz }
         return Mesh(v, tris)
     }
+
+    /** Same mesh with every triangle's winding reversed. */
+    fun flipped(): Mesh = Mesh(verts, IntArray(tris.size) { val t = it / 3; when (it % 3) { 0 -> tris[3 * t]; 1 -> tris[3 * t + 2]; else -> tris[3 * t + 1] } })
 
     /** Binary STL. */
     fun writeStl(out: OutputStream, name: String = "scan3d") {
@@ -96,63 +160,73 @@ class Mesh(val verts: FloatArray, val tris: IntArray) {
             var nx = uy * vz - uz * vy; var ny = uz * vx - ux * vz; var nz = ux * vy - uy * vx
             val nn = Math.sqrt((nx * nx + ny * ny + nz * nz).toDouble()).toFloat(); if (nn > 0) { nx /= nn; ny /= nn; nz /= nn }
             rec.putFloat(nx).putFloat(ny).putFloat(nz)
-            for (i in intArrayOf(a, b, c)) rec.putFloat(verts[i]).putFloat(verts[i + 1]).putFloat(verts[i + 2])
+            rec.putFloat(verts[a]).putFloat(verts[a + 1]).putFloat(verts[a + 2])
+            rec.putFloat(verts[b]).putFloat(verts[b + 1]).putFloat(verts[b + 2])
+            rec.putFloat(verts[c]).putFloat(verts[c + 1]).putFloat(verts[c + 2])
             rec.putShort(0)
             out.write(rec.array())
         }
         out.flush()
     }
 
-    fun writeStl(file: File) = file.outputStream().buffered().use { writeStl(it) }
+    fun writeStl(file: File) = file.outputStream().buffered(1 shl 16).use { writeStl(it) }
 }
 
 /**
  * Marching cubes on a Carve.Grid (surface at f = 0, object where f > 0), with the bottom closed
- * at the board plane. Outputs outward-facing triangles. Table-driven (standard 256-case tables).
+ * at the board plane. Outputs outward-facing triangles with shared vertices. Table-driven (standard 256-case tables).
  */
 object MarchingCubes {
+    private val CORNER = arrayOf(intArrayOf(0, 0, 0), intArrayOf(1, 0, 0), intArrayOf(1, 1, 0), intArrayOf(0, 1, 0), intArrayOf(0, 0, 1), intArrayOf(1, 0, 1), intArrayOf(1, 1, 1), intArrayOf(0, 1, 1))
+    private val EDGE = arrayOf(intArrayOf(0, 1), intArrayOf(1, 2), intArrayOf(2, 3), intArrayOf(3, 0), intArrayOf(4, 5), intArrayOf(5, 6), intArrayOf(6, 7), intArrayOf(7, 4), intArrayOf(0, 4), intArrayOf(1, 5), intArrayOf(2, 6), intArrayOf(3, 7))
+
     fun run(g: Carve.Grid): Mesh {
         // pad the grid by one layer of "outside" and a mirrored bottom layer so the mesh is closed
         val nx = g.nx + 2; val ny = g.ny + 2; val nz = g.nz + 2
-        val f = FloatArray(nx * ny * nz) { (-g.voxel).toFloat() }
-        fun id(i: Int, j: Int, k: Int) = (i * ny + j) * nz + k
-        for (i in 0 until g.nx) for (j in 0 until g.ny) for (k in 0 until g.nz) f[id(i + 1, j + 1, k + 1)] = g.f[g.idx(i, j, k)]
-        for (i in 0 until g.nx) for (j in 0 until g.ny) f[id(i + 1, j + 1, 0)] = -abs(f[id(i + 1, j + 1, 1)])   // closes exactly at z = 0
-        val verts = ArrayList<Float>(); val tris = ArrayList<Int>()
-        val edgeCache = HashMap<Long, Int>()
+        val f = FloatArray(nx * ny * nz); java.util.Arrays.fill(f, (-g.voxel).toFloat())
+        for (i in 0 until g.nx) for (j in 0 until g.ny) System.arraycopy(g.f, g.idx(i, j, 0), f, ((i + 1) * ny + (j + 1)) * nz + 1, g.nz)
+        for (i in 0 until g.nx) for (j in 0 until g.ny) { val o = ((i + 1) * ny + (j + 1)) * nz; f[o] = -abs(f[o + 1]) }   // closes exactly at z = 0
+        val verts = FloatBuf(1 shl 16); val tris = IntBuf(1 shl 16)
+        val edgeCache = LongIntMap(1 shl 16)
         val vox = g.voxel
-        fun pos(i: Int, j: Int, k: Int) = floatArrayOf((g.x0 + (i - 1) * vox).toFloat(), (g.y0 + (j - 1) * vox).toFloat(), (g.z0 + (k - 1) * vox).toFloat())
-        fun vertexOnEdge(i0: Int, j0: Int, k0: Int, i1: Int, j1: Int, k1: Int): Int {
-            val key = (id(i0, j0, k0).toLong() shl 32) or id(i1, j1, k1).toLong()
-            edgeCache[key]?.let { return it }
-            val a = f[id(i0, j0, k0)]; val b = f[id(i1, j1, k1)]
-            val t = if (abs(a - b) < 1e-12f) 0.5f else (a / (a - b)).coerceIn(0f, 1f)
-            val p0 = pos(i0, j0, k0); val p1 = pos(i1, j1, k1)
-            verts.add(p0[0] + (p1[0] - p0[0]) * t); verts.add(p0[1] + (p1[1] - p0[1]) * t); verts.add(p0[2] + (p1[2] - p0[2]) * t)
-            val idx = verts.size / 3 - 1; edgeCache[key] = idx; return idx
-        }
-        val cornerOff = arrayOf(intArrayOf(0, 0, 0), intArrayOf(1, 0, 0), intArrayOf(1, 1, 0), intArrayOf(0, 1, 0), intArrayOf(0, 0, 1), intArrayOf(1, 0, 1), intArrayOf(1, 1, 1), intArrayOf(0, 1, 1))
-        val edgeCorners = arrayOf(intArrayOf(0, 1), intArrayOf(1, 2), intArrayOf(2, 3), intArrayOf(3, 0), intArrayOf(4, 5), intArrayOf(5, 6), intArrayOf(6, 7), intArrayOf(7, 4), intArrayOf(0, 4), intArrayOf(1, 5), intArrayOf(2, 6), intArrayOf(3, 7))
-        for (i in 0 until nx - 1) for (j in 0 until ny - 1) for (k in 0 until nz - 1) {
-            var cube = 0
-            for (c in 0 until 8) if (f[id(i + cornerOff[c][0], j + cornerOff[c][1], k + cornerOff[c][2])] > 0) cube = cube or (1 shl c)
-            if (cube == 0 || cube == 255) continue
-            val tbl = TRI_TABLE[cube]
-            var e = 0
-            while (e < tbl.size && tbl[e] != -1) {
-                val vIdx = IntArray(3)
-                for (m in 0 until 3) {
-                    val ec = edgeCorners[tbl[e + m]]
-                    val c0 = cornerOff[ec[0]]; val c1 = cornerOff[ec[1]]
-                    vIdx[m] = vertexOnEdge(i + c0[0], j + c0[1], k + c0[2], i + c1[0], j + c1[1], k + c1[2])
+        val table = TRI_TABLE
+        val off = IntArray(8) { (CORNER[it][0] * ny + CORNER[it][1]) * nz + CORNER[it][2] }
+        val vIdx = IntArray(3)
+        for (i in 0 until nx - 1) for (j in 0 until ny - 1) {
+            val base0 = (i * ny + j) * nz
+            for (k in 0 until nz - 1) {
+                val base = base0 + k
+                var cube = 0
+                for (c in 0 until 8) if (f[base + off[c]] > 0) cube = cube or (1 shl c)
+                if (cube == 0 || cube == 255) continue
+                val tbl = table[cube]
+                var e = 0
+                while (e < tbl.size && tbl[e] != -1) {
+                    for (m in 0 until 3) {
+                        val ec = EDGE[tbl[e + m]]
+                        val ia = base + off[ec[0]]; val ib = base + off[ec[1]]
+                        val key = (minOf(ia, ib).toLong() shl 32) or maxOf(ia, ib).toLong()
+                        var id = edgeCache.get(key)
+                        if (id < 0) {
+                            val a = f[ia]; val b = f[ib]
+                            val t = if (abs(a - b) < 1e-12f) 0.5f else (a / (a - b)).coerceIn(0f, 1f)
+                            val c0 = CORNER[ec[0]]; val c1 = CORNER[ec[1]]
+                            val x0 = (g.x0 + (i + c0[0] - 1) * vox).toFloat(); val y0 = (g.y0 + (j + c0[1] - 1) * vox).toFloat(); val z0 = (g.z0 + (k + c0[2] - 1) * vox).toFloat()
+                            val x1 = (g.x0 + (i + c1[0] - 1) * vox).toFloat(); val y1 = (g.y0 + (j + c1[1] - 1) * vox).toFloat(); val z1 = (g.z0 + (k + c1[2] - 1) * vox).toFloat()
+                            id = verts.n / 3
+                            verts.add(x0 + (x1 - x0) * t); verts.add(y0 + (y1 - y0) * t); verts.add(z0 + (z1 - z0) * t)
+                            edgeCache.put(key, id)
+                        }
+                        vIdx[m] = id
+                    }
+                    // table winding is for "inside = value < iso"; ours is inside = f > 0, so flip to face outward
+                    tris.add(vIdx[0]); tris.add(vIdx[2]); tris.add(vIdx[1])
+                    e += 3
                 }
-                // table winding is for "inside = value < iso"; ours is inside = f > 0, so flip to face outward
-                tris.add(vIdx[0]); tris.add(vIdx[2]); tris.add(vIdx[1])
-                e += 3
             }
         }
-        val m = Mesh(verts.toFloatArray(), tris.toIntArray())
-        return if (m.volume() < 0) Mesh(m.verts, IntArray(m.tris.size) { val t = it / 3; val w = it % 3; m.tris[3 * t + intArrayOf(0, 2, 1)[w]] }) else m
+        val m = Mesh(verts.toArray(), tris.toArray())
+        return if (m.volume() < 0) m.flipped() else m
     }
 
     // Standard marching cubes triangle table (Paul Bourke / Lorensen-Cline). Edges listed per case, -1 terminated.

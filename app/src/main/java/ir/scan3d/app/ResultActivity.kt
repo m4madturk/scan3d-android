@@ -99,10 +99,10 @@ class ResultActivity : AppCompatActivity() {
         b.cleanBox.visibility = android.view.View.VISIBLE
         fun f1(v: Double) = Ui.fa("%.1f".format(v))
         b.cleanDims.text = getString(R.string.clean_dims, f1(fit.optDouble("w")), f1(fit.optDouble("l")), f1(fit.optDouble("h")),
-            f1(fit.optDouble("rc")), f1(fit.optDouble("rz")), Ui.fa("%.0f".format(100 * fit.optDouble("within1mm"))))
+            f1(fit.optDouble("rc")), f1(fit.optDouble("rz")), Ui.fa("%.0f".format(100 * fit.optDouble("within"))))
         val warn = StringBuilder()
-        if (fit.optDouble("tilt_deg") > 1.5) warn.append(getString(R.string.clean_tilt, f1(fit.optDouble("tilt_deg")))).append("\n")
-        if (fit.optDouble("within1mm") < 0.7) warn.append(getString(R.string.clean_loose, Ui.fa("%.0f".format(100 * fit.optDouble("within1mm"))))).append("\n")
+        if (fit.optDouble("tilt_deg") > 2.0) warn.append(getString(R.string.clean_tilt, f1(fit.optDouble("tilt_deg")))).append("\n")
+        if (fit.optDouble("within") < 0.6) warn.append(getString(R.string.clean_loose, Ui.fa("%.0f".format(100 * fit.optDouble("within"))))).append("\n")
         b.cleanWarn.text = warn.toString().trim(); b.cleanWarn.visibility = if (warn.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE
         val png = File(dir, "preview_clean.png")
         if (png.exists()) { b.previewClean.setImageBitmap(BitmapFactory.decodeFile(png.absolutePath)); b.previewClean.visibility = android.view.View.VISIBLE } else b.previewClean.visibility = android.view.View.GONE

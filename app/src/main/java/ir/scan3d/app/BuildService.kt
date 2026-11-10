@@ -46,20 +46,24 @@ class BuildService : Service() {
                 val shots = session.shots.filter { it.state == "done" }
                 write(resultFile, JSONObject().put("state", "processing").put("progress", 0.0).put("message", ""))
                 if (calib) {
-                    val fr = Pipeline.frameObs(shots)
-                    val w = shots[0].w; val h = shots[0].h
+                    // one image size only (the majority): a profile belongs to one sensor frame
+                    val (w, h) = shots.groupBy { it.w to it.h }.maxByOrNull { it.value.size }!!.key
+                    val same = shots.filter { it.w == w && it.h == h }
+                    if (same.size < shots.size) log("${shots.size - same.size} photo(s) with a different image size skipped")
+                    val fr = Pipeline.frameObs(same)
                     val cal = Calibrator(Detector.SQUARE_M * 1000, Detector.SQUARES_X); cal.log = ::log
-                    val rolled = BooleanArray(shots.size) { shots[it].landscape }
+                    val rolled = BooleanArray(same.size) { same[it].landscape }
                     val r = cal.calibrate(fr, w, h, rolled)
                     val prof = JSONObject().put("device", Build.MODEL).put("image_size", JSONArray(listOf(w, h))).put("frame", "sensor")
                         .put("f", r.camera.f).put("cx", r.camera.cx).put("cy", r.camera.cy).put("k1", r.camera.k1).put("k2", r.camera.k2)
                         .put("sigma", JSONArray(r.sigma.toList())).put("rms_px", r.rms).put("frames", r.frames).put("rolled", r.rolled)
                         .put("coverage", JSONArray(listOf(r.coverage, r.coverageCells))).put("model", r.model).put("warnings", JSONArray(r.warnings))
-                        .put("created", System.currentTimeMillis())
+                        .put("sheet_bend_mm", r.sheetBendMm).put("created", System.currentTimeMillis())
                     store.saveProfile(prof)
                     write(resultFile, JSONObject().put("state", "done").put("f_px", r.camera.f).put("cx", r.camera.cx).put("cy", r.camera.cy)
-                        .put("k1", r.camera.k1).put("rms_px", r.rms).put("frames", r.frames).put("sigma_f", r.sigma[0])
-                        .put("warnings", JSONArray(r.warnings)).put("message", "profile saved for ${Build.MODEL} (${r.model}); f ± %.1f px".format(r.sigma[0])))
+                        .put("k1", r.camera.k1).put("k2", r.camera.k2).put("rms_px", r.rms).put("frames", r.frames).put("sigma_f", r.sigma[0])
+                        .put("rolled", r.rolled).put("coverage", r.coverage).put("coverage_cells", r.coverageCells).put("sheet_bend_mm", r.sheetBendMm).put("model", r.model)
+                        .put("warnings", JSONArray(r.warnings)).put("message", "profile saved for " + Build.MODEL + " (" + r.model + "); f ± " + "%.1f".format(r.sigma[0]) + " px"))
                 } else {
                     val prior = store.loadProfile(shots[0].w, shots[0].h)?.let { p ->
                         val sg = p.getJSONArray("sigma")

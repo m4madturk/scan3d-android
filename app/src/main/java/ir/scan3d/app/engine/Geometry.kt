@@ -2,6 +2,7 @@ package ir.scan3d.app.engine
 
 import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -99,32 +100,81 @@ class Pose6(@JvmField val r: DoubleArray, @JvmField val t: DoubleArray) {
     fun copy() = Pose6(r.copyOf(), t.copyOf())
 }
 
+/**
+ * Out-of-plane shape of the printed sheet. Paper that is not glued to something rigid bends by millimetres;
+ * the solver estimates that bend as a quadratic surface (the model mrcal and Hagemann et al. use for
+ * calibration boards). No constant or linear term: those are the pose's. Coefficients are in mm at the
+ * normalised distance 1 = half the board diagonal from the board centre.
+ */
+class SheetWarp(@JvmField val cx: Double, @JvmField val cy: Double, @JvmField val half: Double, @JvmField val k: DoubleArray = DoubleArray(3)) {
+    /** Height of the sheet at board position (x, y) in mm, positive towards the camera side (board z = -height). */
+    fun height(x: Double, y: Double): Double {
+        val u = (x - cx) / half; val v = (y - cy) / half
+        return k[0] * u * u + k[1] * u * v + k[2] * v * v
+    }
+    fun isFlat() = k[0] == 0.0 && k[1] == 0.0 && k[2] == 0.0
+    fun copy() = SheetWarp(cx, cy, half, k.copyOf())
+    /** The board corner with this in-plane position, on the bent sheet (board frame, z into the board). */
+    fun lift(p: Vec3) = Vec3(p.x, p.y, -height(p.x, p.y))
+
+    /** Largest minus smallest height over the sheet (mm): how far from flat it is. */
+    fun peakToValley(): Double {
+        var lo = Double.MAX_VALUE; var hi = -Double.MAX_VALUE
+        for (i in 0..20) for (j in 0..20) { val h = height(2 * cx * i / 20.0, 2 * cy * j / 20.0); if (h < lo) lo = h; if (h > hi) hi = h }
+        return hi - lo
+    }
+
+    /** Local slope of the sheet at (x, y): tilt of the tangent plane in degrees. */
+    fun slopeDeg(x: Double, y: Double): Double {
+        val e = 1.0
+        val sx = (height(x + e, y) - height(x - e, y)) / (2 * e); val sy = (height(x, y + e) - height(x, y - e)) / (2 * e)
+        return Math.toDegrees(Math.atan(hypot(sx, sy)))
+    }
+
+    companion object {
+        fun flat(widthMm: Double, heightMm: Double) = SheetWarp(widthMm / 2, heightMm / 2, hypot(widthMm, heightMm) / 2)
+    }
+}
+
 /** Dense Cholesky solve of a symmetric positive-definite system A x = b (A is n x n row-major). */
 object Linear {
-    fun choleskySolve(A: Array<DoubleArray>, b: DoubleArray): DoubleArray? {
-        val n = b.size
+    /** Lower-triangular Cholesky factor, or null when A is not positive definite. */
+    fun cholesky(A: Array<DoubleArray>): Array<DoubleArray>? {
+        val n = A.size
         val L = Array(n) { DoubleArray(n) }
         for (i in 0 until n) {
+            val Li = L[i]
             for (j in 0..i) {
-                var s = A[i][j]
-                for (k in 0 until j) s -= L[i][k] * L[j][k]
-                if (i == j) { if (s <= 1e-300) return null; L[i][i] = sqrt(s) } else L[i][j] = s / L[j][j]
+                var s = A[i][j]; val Lj = L[j]
+                for (k in 0 until j) s -= Li[k] * Lj[k]
+                if (i == j) { if (s <= 1e-300) return null; Li[i] = sqrt(s) } else Li[j] = s / Lj[j]
             }
         }
+        return L
+    }
+
+    /** Solve L L^T x = b with a factor from [cholesky]. */
+    fun cholSolve(L: Array<DoubleArray>, b: DoubleArray): DoubleArray {
+        val n = b.size
         val y = DoubleArray(n)
-        for (i in 0 until n) { var s = b[i]; for (k in 0 until i) s -= L[i][k] * y[k]; y[i] = s / L[i][i] }
+        for (i in 0 until n) { var s = b[i]; val Li = L[i]; for (k in 0 until i) s -= Li[k] * y[k]; y[i] = s / Li[i] }
         val x = DoubleArray(n)
         for (i in n - 1 downTo 0) { var s = y[i]; for (k in i + 1 until n) s -= L[k][i] * x[k]; x[i] = s / L[i][i] }
         return x
     }
 
-    /** Inverse of a symmetric positive-definite matrix via Cholesky (for covariance). */
+    fun choleskySolve(A: Array<DoubleArray>, b: DoubleArray): DoubleArray? = cholesky(A)?.let { cholSolve(it, b) }
+
+    /** Inverse of a symmetric positive-definite matrix (for covariance): one factorisation, n solves. */
     fun inverseSpd(A: Array<DoubleArray>): Array<DoubleArray>? {
         val n = A.size
+        val L = cholesky(A) ?: return null
         val inv = Array(n) { DoubleArray(n) }
+        val e = DoubleArray(n)
         for (j in 0 until n) {
-            val e = DoubleArray(n); e[j] = 1.0
-            val col = choleskySolve(A, e) ?: return null
+            e[j] = 1.0
+            val col = cholSolve(L, e)
+            e[j] = 0.0
             for (i in 0 until n) inv[i][j] = col[i]
         }
         return inv

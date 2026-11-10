@@ -100,18 +100,16 @@ class ScreenshotTest {
 
     @Test fun resultDone() {
         val dir = scanSession("s_done", false, 14)
-        // a tilted rounded box as the "scan", run through the real fitter so the clean section shows real numbers
-        val truth = ir.scan3d.app.engine.ShapeFit.Params(0.0, 0.0, Math.toRadians(12.0), 66.0, 58.0, 27.0, 10.0, 5.0, Math.toRadians(2.5), Math.toRadians(-1.0))
-        val mesh = ir.scan3d.app.engine.ShapeFit.mesh(truth.copy().also { it.tx = 0.0; it.ty = 0.0 })
-        mesh.writeStl(File(dir, "model.stl"))
-        Preview.render(mesh, File(dir, "preview.png"))
-        val fit = ir.scan3d.app.engine.ShapeFit.fit(mesh)!!
-        val clean = ir.scan3d.app.engine.ShapeFit.mesh(fit.params)
-        clean.writeStl(File(dir, "model_clean.stl")); Preview.render(clean, File(dir, "preview_clean.png"))
-        val rep = Pipeline.Report(doubleArrayOf(66.4, 58.3, 27.0), 97.2, 14, 7, 0.31, 7, 14,
-            listOf("only 2 rolled photos; focal length and principal point weakly separated"), 148.0, mesh.triangleCount, fit)
-        val j = Pipeline.reportJson(rep).put("state", "done").put("message", "14 views, 148 s")
-        j.getJSONObject("fit").put("tilt_deg", 2.7)        // as a bent sheet would show
+        // a rounded box as the "scan" and as the clean model, with numbers like a real 14-photo scan
+        val p = doubleArrayOf(0.0, 0.0, Math.toRadians(12.0), 66.4, 66.1, 24.9, 21.8, 7.5, 0.0, 0.0, 4.9)
+        val mesh = ir.scan3d.app.engine.RayFit.mesh(p, 2.0)
+        mesh.writeStl(File(dir, "model.stl")); Preview.render(mesh, File(dir, "preview.png"))
+        mesh.writeStl(File(dir, "model_clean.stl")); Preview.render(mesh, File(dir, "preview_clean.png"))
+        val sigma = DoubleArray(11); sigma[3] = 0.13; sigma[4] = 0.19; sigma[5] = 0.17; sigma[6] = 0.8
+        val fit = Pipeline.Fit(p, sigma, 4.7, 0.78, 0.21, 3890, 2310, 14, 5)
+        val rep = Pipeline.Report(doubleArrayOf(69.4, 69.3, 28.4), 97.2, 14, 7, 0.31, 7, 14,
+            listOf("object tilted 4.7 deg on the sheet: it is not lying flat, so its height is uncertain by about 2.7 mm"), 21.0, mesh.triangleCount, fit, 2.5, 2881.0, DoubleArray(14) { 0.3 + 0.02 * it })
+        val j = Pipeline.reportJson(rep).put("state", "done").put("message", "14 views, 21 s")
         File(dir, "result.json").writeText(j.toString())
         ActivityScenario.launch<ResultActivity>(Intent(ctx, ResultActivity::class.java).putExtra("sid", "s_done")).use {
             Thread.sleep(1500)
