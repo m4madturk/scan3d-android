@@ -49,5 +49,8 @@ object Ui {
 
     /** Persian digits for user-facing numbers. */
     fun fa(n: Number): String = fa(n.toString())
-    fun fa(s: String): String = s.map { ch -> if (ch.isDigit()) ('۰' + (ch - '0')) else ch }.joinToString("")
+    fun fa(s: String): String = s.map { ch -> if (ch in '0'..'9') ('۰' + (ch - '0')) else ch }.joinToString("")
+
+    /** A number with a fixed count of decimals in Persian digits and with the Persian decimal mark. */
+    fun num(v: Double, decimals: Int = 1): String = fa(String.format(java.util.Locale.US, "%." + decimals + "f", v)).replace('.', '٫')
 }

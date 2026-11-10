@@ -460,4 +460,45 @@ class EngineTest {
         val sm = one.taubin(8)
         assertEquals(one.volume(), sm.volume(), 0.02 * one.volume())
     }
+
+    /** STL for the viewer: real edges keep their face normals, curved surfaces get smooth ones. */
+    @Test
+    fun stlLoaderKeepsEdgesSharpAndCurvesSmooth() {
+        fun roundTrip(m: Mesh): Stl.Model {
+            val f = java.io.File.createTempFile("scan3d", ".stl")
+            try { m.writeStl(f); return Stl.load(f)!! } finally { f.delete() }
+        }
+        // a 20 mm cube: every corner must carry the normal of its own face (90 degree creases)
+        val cv = floatArrayOf(0f, 0f, 0f, 20f, 0f, 0f, 20f, 20f, 0f, 0f, 20f, 0f, 0f, 0f, 20f, 20f, 0f, 20f, 20f, 20f, 20f, 0f, 20f, 20f)
+        val ct = intArrayOf(0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7)
+        val cube = roundTrip(Mesh(cv, ct))
+        assertEquals(12, cube.triangles)
+        assertEquals(0f, cube.min[0], 1e-6f); assertEquals(20f, cube.max[2], 1e-6f)
+        val cd = FloatArray(cube.vertexCount * 6); cube.data.get(cd); cube.data.position(0)
+        for (c in 0 until cube.vertexCount) {
+            val nx = abs(cd[6 * c + 3]); val ny = abs(cd[6 * c + 4]); val nz = abs(cd[6 * c + 5])
+            assertEquals("cube corner $c must have an axis-aligned normal ($nx, $ny, $nz)", 1f, maxOf(nx, ny, nz), 1e-5f)
+            assertEquals(1f, nx + ny + nz, 1e-5f)
+        }
+        // a sphere of radius 10: every corner normal must be radial (smooth), far closer than the 15 degree facets
+        val nA = 24; val nE = 11
+        val sv = ArrayList<Float>(); val st = ArrayList<Int>()
+        for (r in 0 until nE) { val el = Math.toRadians(-90.0 + 180.0 * (r + 1) / (nE + 1))
+            for (a in 0 until nA) { val az = 2 * Math.PI * a / nA; sv.add((10 * Math.cos(el) * Math.cos(az)).toFloat()); sv.add((10 * Math.cos(el) * Math.sin(az)).toFloat()); sv.add((10 * Math.sin(el)).toFloat()) } }
+        val top = sv.size / 3; sv.add(0f); sv.add(0f); sv.add(10f)
+        val bot = sv.size / 3; sv.add(0f); sv.add(0f); sv.add(-10f)
+        for (r in 0 until nE - 1) for (a in 0 until nA) { val b = (a + 1) % nA
+            st.add(r * nA + a); st.add(r * nA + b); st.add((r + 1) * nA + a); st.add(r * nA + b); st.add((r + 1) * nA + b); st.add((r + 1) * nA + a) }
+        for (a in 0 until nA) { val b = (a + 1) % nA; st.add((nE - 1) * nA + a); st.add((nE - 1) * nA + b); st.add(top); st.add(b); st.add(a); st.add(bot) }
+        val sphere = roundTrip(Mesh(sv.toFloatArray(), st.toIntArray()))
+        val sd = FloatArray(sphere.vertexCount * 6); sphere.data.get(sd)
+        var worst = 1.0
+        for (c in 0 until sphere.vertexCount) {
+            val x = sd[6 * c]; val y = sd[6 * c + 1]; val z = sd[6 * c + 2]
+            val dot = (x * sd[6 * c + 3] + y * sd[6 * c + 4] + z * sd[6 * c + 5]) / 10.0
+            if (dot < worst) worst = dot
+        }
+        println("stl: sphere corner normals within %.2f deg of radial".format(Math.toDegrees(Math.acos(worst.coerceIn(-1.0, 1.0)))))
+        assertTrue("sphere normals must be smooth (worst cos $worst)", worst > Math.cos(Math.toRadians(3.0)))
+    }
 }

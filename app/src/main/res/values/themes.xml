@@ -1,46 +1,109 @@
 <resources>
     <style name="Theme.Scan3D" parent="Theme.Material3.Dark.NoActionBar">
-        <item name="colorPrimary">#3BC2B9</item>
-        <item name="colorOnPrimary">#06201E</item>
-        <item name="android:windowBackground">#0F1513</item>
+        <item name="colorPrimary">@color/accent</item>
+        <item name="colorOnPrimary">@color/on_accent</item>
+        <item name="colorSurface">@color/surface</item>
+        <item name="colorOnSurface">@color/text</item>
+        <item name="android:colorBackground">@color/bg</item>
+        <item name="android:windowBackground">@color/bg</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">false</item>
+        <item name="android:fontFamily">@font/vazirmatn</item>
+        <item name="fontFamily">@font/vazirmatn</item>
+        <item name="bottomSheetDialogTheme">@style/Scan3D.Sheet</item>
     </style>
 
-    <!-- compact buttons so four fit in one row on a 360 dp wide phone -->
+    <style name="Scan3D.Sheet" parent="ThemeOverlay.Material3.BottomSheetDialog">
+        <item name="bottomSheetStyle">@style/Scan3D.SheetModal</item>
+        <item name="android:fontFamily">@font/vazirmatn</item>
+        <item name="fontFamily">@font/vazirmatn</item>
+    </style>
+    <style name="Scan3D.SheetModal" parent="Widget.Material3.BottomSheet.Modal">
+        <item name="backgroundTint">@color/surface</item>
+    </style>
+
+    <!-- primary action -->
     <style name="Scan3D.Button" parent="Widget.Material3.Button">
         <item name="android:insetTop">3dp</item>
         <item name="android:insetBottom">3dp</item>
-        <item name="android:minHeight">42dp</item>
+        <item name="android:minHeight">48dp</item>
         <item name="android:minWidth">0dp</item>
-        <item name="android:paddingStart">6dp</item>
-        <item name="android:paddingEnd">6dp</item>
-        <item name="android:textSize">13sp</item>
+        <item name="android:paddingStart">12dp</item>
+        <item name="android:paddingEnd">12dp</item>
+        <item name="android:textSize">14sp</item>
         <item name="android:maxLines">1</item>
         <item name="android:ellipsize">end</item>
-        <item name="android:layout_marginStart">2dp</item>
-        <item name="android:layout_marginEnd">2dp</item>
+        <item name="android:fontFamily">@font/vazirmatn</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:layout_marginStart">3dp</item>
+        <item name="android:layout_marginEnd">3dp</item>
     </style>
     <style name="Scan3D.Button.Outlined" parent="Widget.Material3.Button.OutlinedButton">
         <item name="android:insetTop">3dp</item>
         <item name="android:insetBottom">3dp</item>
-        <item name="android:minHeight">42dp</item>
+        <item name="android:minHeight">48dp</item>
         <item name="android:minWidth">0dp</item>
-        <item name="android:paddingStart">6dp</item>
-        <item name="android:paddingEnd">6dp</item>
-        <item name="android:textSize">13sp</item>
+        <item name="android:paddingStart">12dp</item>
+        <item name="android:paddingEnd">12dp</item>
+        <item name="android:textSize">14sp</item>
         <item name="android:maxLines">1</item>
         <item name="android:ellipsize">end</item>
-        <item name="android:layout_marginStart">2dp</item>
-        <item name="android:layout_marginEnd">2dp</item>
+        <item name="android:fontFamily">@font/vazirmatn</item>
+        <item name="android:layout_marginStart">3dp</item>
+        <item name="android:layout_marginEnd">3dp</item>
+    </style>
+    <style name="Scan3D.Button.Text" parent="Widget.Material3.Button.TextButton">
+        <item name="android:minHeight">44dp</item>
+        <item name="android:minWidth">0dp</item>
+        <item name="android:paddingStart">10dp</item>
+        <item name="android:paddingEnd">10dp</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:fontFamily">@font/vazirmatn</item>
     </style>
     <style name="Scan3D.Radio" parent="Widget.Material3.CompoundButton.RadioButton">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:textColor">#E5ECE8</item>
-        <item name="android:textSize">13sp</item>
-        <item name="android:minHeight">36dp</item>
-        <item name="android:paddingEnd">2dp</item>
+        <item name="android:textColor">@color/text</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:minHeight">44dp</item>
+        <item name="android:paddingEnd">6dp</item>
+    </style>
+
+    <!-- small status chip -->
+    <style name="Scan3D.Chip" parent="">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:background">@drawable/bg_chip</item>
+        <item name="android:paddingStart">9dp</item>
+        <item name="android:paddingEnd">9dp</item>
+        <item name="android:paddingTop">3dp</item>
+        <item name="android:paddingBottom">3dp</item>
+        <item name="android:layout_marginEnd">5dp</item>
+        <item name="android:textColor">@color/text</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:maxLines">1</item>
+    </style>
+    <!-- row inside a bottom sheet -->
+    <style name="Scan3D.SheetRow" parent="">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:minHeight">50dp</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:paddingStart">20dp</item>
+        <item name="android:paddingEnd">20dp</item>
+        <item name="android:textColor">@color/text</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:background">?android:attr/selectableItemBackground</item>
+    </style>
+    <style name="Scan3D.Label" parent="">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">@color/text_dim</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:paddingStart">20dp</item>
+        <item name="android:paddingEnd">20dp</item>
+        <item name="android:paddingTop">12dp</item>
+        <item name="android:paddingBottom">2dp</item>
     </style>
 </resources>

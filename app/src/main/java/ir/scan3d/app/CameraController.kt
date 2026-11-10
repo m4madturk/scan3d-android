@@ -21,6 +21,7 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -51,12 +52,15 @@ class CameraController(private val ctx: Context) {
     var sensorOrientation = 90; private set
     var sensorSize: Size? = null; private set
     var locked = false; private set
+    var info: org.json.JSONObject? = null; private set     // lens / sensor facts for the session file
 
     fun start(owner: LifecycleOwner, previewView: PreviewView, analyzer: (ImageProxy) -> Unit, onReady: () -> Unit) {
         val future = ProcessCameraProvider.getInstance(ctx)
         future.addListener({
             val provider = future.get()
-            val preview = Preview.Builder().also { tuneRequest(it) }.build()
+            // 4:3 like the sensor and the analysis frames: what is drawn over the preview lines up with the picture
+            val preview = Preview.Builder().also { tuneRequest(it) }
+                .setResolutionSelector(ResolutionSelector.Builder().setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY).build()).build()
             preview.surfaceProvider = previewView.surfaceProvider
 
             val capB = ImageCapture.Builder()
@@ -114,23 +118,43 @@ class CameraController(private val ctx: Context) {
                 focalPx = (fl[0] / ps.width * sensorSize!!.width).toDouble()
             }
             Log.i("Scan3D", "sensor $sensorSize focal ${fl?.toList()} -> fpx $focalPx")
+            // everything the phone knows about this lens, kept with the session: a factory intrinsic calibration
+            // (where the vendor provides one) is an independent check of the solved camera
+            val j = org.json.JSONObject()
+            fl?.let { j.put("focal_mm", org.json.JSONArray(it.map { v -> v.toDouble() })) }
+            ps?.let { j.put("sensor_mm", org.json.JSONArray(listOf(it.width.toDouble(), it.height.toDouble()))) }
+            px?.let { j.put("pixel_array", org.json.JSONArray(listOf(it.width, it.height))) }
+            jpeg?.let { j.put("jpeg", org.json.JSONArray(listOf(it.width, it.height))) }
+            info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)?.let { j.put("active_array", org.json.JSONArray(listOf(it.left, it.top, it.right, it.bottom))) }
+            info.getCameraCharacteristic(CameraCharacteristics.LENS_INTRINSIC_CALIBRATION)?.let { j.put("intrinsic", org.json.JSONArray(it.map { v -> v.toDouble() })) }
+            if (android.os.Build.VERSION.SDK_INT >= 28) info.getCameraCharacteristic(CameraCharacteristics.LENS_DISTORTION)?.let { j.put("distortion", org.json.JSONArray(it.map { v -> v.toDouble() })) }
+            info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE)?.let { j.put("min_focus_diopters", it.toDouble()) }
+            info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE)?.let { j.put("timestamp_source", it) }
+            info.getCameraCharacteristic(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)?.let { j.put("hardware_level", it) }
+            j.put("sensor_orientation", sensorOrientation)
+            this.info = j
         } catch (e: Exception) { Log.w("Scan3D", "characteristics: $e") }
     }
 
-    /** Lock exposure, white balance and focus where they are now. Call once the board is framed. */
-    fun lock() {
+    /**
+     * Lock exposure and white balance where they are now, and the focus at `focusDiopters` (default: where the
+     * autofocus stands now). Call once the board is framed. A session that is continued passes the focus of its
+     * earlier photos, so all of them share one focal length.
+     */
+    fun lock(focusDiopters: Float? = null) {
         val cam = camera ?: return
         val c2 = Camera2CameraControl.from(cam.cameraControl)
         c2.setCaptureRequestOptions(CaptureRequestOptions.Builder()
             .setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, true)
             .setCaptureRequestOption(CaptureRequest.CONTROL_AWB_LOCK, true)
             .setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_OFF)
-            .setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, lastFocus)
+            .setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, focusDiopters ?: lastFocus)
             .build())
         locked = true
     }
 
     fun unlock() {
+        if (!locked) return
         val cam = camera ?: return
         Camera2CameraControl.from(cam.cameraControl).setCaptureRequestOptions(CaptureRequestOptions.Builder()
             .setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, false)

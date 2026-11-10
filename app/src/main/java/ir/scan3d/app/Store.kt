@@ -13,25 +13,40 @@ class Store(ctx: Context) {
 
     fun sessionDir(sid: String) = File(root, sid).apply { mkdirs() }
 
-    fun save(s: Session) {
+    /** The session file as text. Built on the thread that owns the session; written wherever is convenient. */
+    fun doc(s: Session): String {
         val j = s.sessionDoc().put("sid", s.sid).put("calib", s.calib)
         val arr = JSONArray(); s.shots.filter { it.state == "done" }.forEach { arr.put(it.toJson()) }
-        j.put("shots", arr)
-        val f = File(sessionDir(s.sid), "session.json"); val tmp = File(f.parentFile, "session.tmp")
-        tmp.writeText(j.toString()); tmp.renameTo(f)
+        return j.put("shots", arr).toString()
     }
+
+    fun write(sid: String, text: String) {
+        val f = File(sessionDir(sid), "session.json"); val tmp = File(f.parentFile, "session.tmp")
+        tmp.writeText(text); tmp.renameTo(f)
+    }
+
+    fun save(s: Session) = write(s.sid, doc(s))
+
+    fun exists(sid: String) = File(File(root, sid), "session.json").exists()
 
     fun load(sid: String): Session? {
         val f = File(sessionDir(sid), "session.json"); if (!f.exists()) return null
         val j = JSONObject(f.readText())
         val s = Session(appCtx, sid, j.optString("name", "scan"), j.optString("mode", "18"), j.optBoolean("calib", false))
+        s.created = j.optLong("created", s.created); s.camera = j.optJSONObject("camera")
         val arr = j.optJSONArray("shots") ?: JSONArray()
         for (i in 0 until arr.length()) s.shots.add(Shot.fromJson(arr.getJSONObject(i), sessionDir(sid)))
         return s
     }
 
     fun list(): List<Pair<String, JSONObject>> = root.listFiles()?.filter { File(it, "session.json").exists() }
-        ?.map { it.name to JSONObject(File(it, "session.json").readText()) }?.sortedByDescending { it.second.optLong("created") } ?: emptyList()
+        ?.mapNotNull { d -> try { d.name to JSONObject(File(d, "session.json").readText()) } catch (_: Exception) { null } }
+        ?.sortedByDescending { it.second.optLong("created") } ?: emptyList()
+
+    /** State of a session's last build: done | processing | failed | null (never built). */
+    fun resultState(sid: String): String? = try {
+        File(File(root, sid), "result.json").takeIf { it.exists() }?.let { JSONObject(it.readText()).optString("state") }
+    } catch (_: Exception) { null }
 
     fun delete(sid: String) { sessionDir(sid).deleteRecursively() }
 
@@ -76,9 +91,13 @@ class Store(ctx: Context) {
     }
 
     fun profileSummary(): String? {
-        val fs = profiles.listFiles()?.filter { it.name.endsWith(".json") && JSONObject(it.readText()).optString("frame") == "sensor" } ?: return null
-        if (fs.isEmpty()) return null
-        val p = JSONObject(fs.maxByOrNull { it.lastModified() }!!.readText())
+        val p = latestProfile() ?: return null
         return "f %.0f px · RMS %.2f px · %d frames".format(p.getDouble("f"), p.getDouble("rms_px"), p.getInt("frames"))
     }
+
+    /** The newest usable lens profile of this phone, or null. */
+    fun latestProfile(): JSONObject? = try {
+        profiles.listFiles()?.filter { it.name.endsWith(".json") }?.sortedByDescending { it.lastModified() }
+            ?.firstNotNullOfOrNull { f -> JSONObject(f.readText()).takeIf { it.optString("frame") == "sensor" } }
+    } catch (_: Exception) { null }
 }

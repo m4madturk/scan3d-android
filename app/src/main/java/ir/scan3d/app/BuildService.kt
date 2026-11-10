@@ -34,6 +34,7 @@ class BuildService : Service() {
         val calib = intent.getBooleanExtra("calib", false)
         val convex = intent.getBooleanExtra("convex", true)
         startForeground(1, notif(getString(if (calib) R.string.processing_calib else R.string.processing_model), 0))
+        runningSid = sid
         scope.launch {
             val store = Store(this@BuildService)
             val dir = store.sessionDir(sid)
@@ -44,6 +45,7 @@ class BuildService : Service() {
             try {
                 val session = store.load(sid) ?: throw IllegalStateException("session not found")
                 val shots = session.shots.filter { it.state == "done" }
+                if (shots.isEmpty()) throw IllegalStateException("fewer than 2 shots with the board")
                 write(resultFile, JSONObject().put("state", "processing").put("progress", 0.0).put("message", ""))
                 if (calib) {
                     // one image size only (the majority): a profile belongs to one sensor frame
@@ -93,10 +95,16 @@ class BuildService : Service() {
             } catch (e: Throwable) {
                 log("FAILED: $e"); write(resultFile, JSONObject().put("state", "failed").put("message", e.message ?: e.toString()))
             } finally {
+                runningSid = null
                 stopForeground(STOP_FOREGROUND_REMOVE); stopSelf()
             }
         }
         return START_NOT_STICKY
+    }
+
+    companion object {
+        /** The session being built in this process, if any. A result file that says "processing" without it is a build that died. */
+        @Volatile var runningSid: String? = null
     }
 
     private fun write(f: File, j: JSONObject) { val tmp = File(f.parentFile, f.name + ".tmp"); tmp.writeText(j.toString()); tmp.renameTo(f) }

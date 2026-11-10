@@ -209,6 +209,8 @@ object Pipeline {
             }
         } catch (e: Exception) { log("clean model failed: $e") }
         stage("clean model fit")
+        val smeared = use.count { shots[it].blurPx > 2.0 }
+        if (smeared > 0) warnings.add("$smeared photo(s) were taken while the phone was moving (smear above 2 px)")
         val bend = warp.peakToValley()
         if (bend > 1.0) warnings.add("the sheet is bent by %.1f mm (it was measured and modelled; a rigid flat board is still better)".format(bend))
         val rep = Report(size, mesh.volume() / 1000, views.size, planes.size, geo.sigma0, geo.stickers.size, geo.frameworkFrames, warnings,

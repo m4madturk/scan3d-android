@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Everything that is not needed for every photo -->
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content">
+<LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:layoutDirection="rtl" android:paddingTop="8dp" android:paddingBottom="16dp">
+
+    <TextView style="@style/Scan3D.Label" android:id="@+id/lblAngles" android:text="@string/lbl_angles" />
+    <LinearLayout android:id="@+id/angleRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:paddingStart="16dp" android:paddingEnd="16dp">
+        <TextView android:id="@+id/mode18" android:layout_width="0dp" android:layout_weight="1" android:layout_height="44dp" android:gravity="center" android:layout_margin="4dp"
+            android:background="@drawable/bg_toggle" android:textColor="@color/toggle_text" android:textSize="14sp" android:text="@string/mode18" />
+        <TextView android:id="@+id/mode8" android:layout_width="0dp" android:layout_weight="1" android:layout_height="44dp" android:gravity="center" android:layout_margin="4dp"
+            android:background="@drawable/bg_toggle" android:textColor="@color/toggle_text" android:textSize="14sp" android:text="@string/mode8" />
+        <TextView android:id="@+id/modeFree" android:layout_width="0dp" android:layout_weight="1" android:layout_height="44dp" android:gravity="center" android:layout_margin="4dp"
+            android:background="@drawable/bg_toggle" android:textColor="@color/toggle_text" android:textSize="14sp" android:text="@string/modeFree" />
+    </LinearLayout>
+
+    <TextView style="@style/Scan3D.Label" android:text="@string/lbl_camera" />
+    <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/swLock" style="@style/Scan3D.SheetRow" android:text="@string/sw_lock" />
+    <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/swTorch" style="@style/Scan3D.SheetRow" android:text="@string/sw_torch" />
+    <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/swConvex" style="@style/Scan3D.SheetRow" android:text="@string/sw_convex" />
+    <TextView android:id="@+id/profile" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:paddingStart="20dp" android:paddingEnd="20dp" android:paddingTop="4dp" android:textColor="@color/text_dim" android:textSize="12sp" />
+
+    <TextView style="@style/Scan3D.Label" android:text="@string/lbl_session" />
+    <TextView android:id="@+id/rowResult" style="@style/Scan3D.SheetRow" android:text="@string/row_result" />
+    <TextView android:id="@+id/rowNew" style="@style/Scan3D.SheetRow" android:text="@string/new_scan" />
+    <TextView android:id="@+id/rowSessions" style="@style/Scan3D.SheetRow" android:text="@string/sessions" />
+    <TextView android:id="@+id/rowMode" style="@style/Scan3D.SheetRow" android:text="@string/to_calib" />
+    <TextView android:id="@+id/rowHelp" style="@style/Scan3D.SheetRow" android:text="@string/row_help" />
+    <TextView android:id="@+id/sid" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingStart="20dp" android:paddingEnd="20dp" android:paddingTop="8dp"
+        android:textColor="@color/text_faint" android:textSize="11sp" android:fontFamily="monospace" android:textDirection="ltr" android:gravity="start" />
+</LinearLayout>
+</androidx.core.widget.NestedScrollView>

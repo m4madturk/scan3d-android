@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="132dp" android:layout_height="wrap_content" android:orientation="vertical" android:layout_margin="6dp"
+    android:background="@drawable/bg_card_hi" android:padding="6dp" android:layoutDirection="rtl">
+    <ImageView android:id="@+id/thumb" android:layout_width="120dp" android:layout_height="150dp" android:scaleType="centerCrop" android:background="@color/bg" android:contentDescription="@string/shots_title" />
+    <TextView android:id="@+id/title" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingTop="6dp" android:textColor="@color/text" android:textSize="12sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" />
+    <TextView android:id="@+id/detail" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/text_dim" android:textSize="12sp" android:lineSpacingExtra="1dp" android:minLines="2" android:maxLines="2" />
+    <TextView android:id="@+id/delete" android:layout_width="match_parent" android:layout_height="38dp" android:layout_marginTop="2dp" android:gravity="center"
+        android:background="?android:attr/selectableItemBackground" android:textColor="@color/bad" android:textSize="13sp" android:text="@string/shot_delete" />
+</LinearLayout>

@@ -26,6 +26,8 @@ class Shot(val n: Int, val id: String) {
     var thumb: File? = null
     var landscape = false         // phone held sideways at capture time
     var exposureNs = 0L; var iso = 0; var focusDist = 0f
+    var motion = 0f               // peak rotation rate of the phone while the frame was exposed (rad/s, gyroscope)
+    var blurPx = 0.0              // what that motion smears, in pixels of the full-resolution photo
 
     fun toJson(): JSONObject {
         val targets = JSONObject()
@@ -43,7 +45,8 @@ class Shot(val n: Int, val id: String) {
             .put("file", JSONObject().put("name", "shot$n.jpg"))
             .put("w", w).put("h", h).put("file_rot", fileRot).put("dev_roll", devRoll).put("landscape", landscape)
             .put("exif", JSONObject().put("orientation", orientation).put("exposure_ns", exposureNs).put("iso", iso)
-                .put("focus_diopters", focusDist.toDouble()).put("landscape", landscape).put("app", "android"))
+                .put("focus_diopters", focusDist.toDouble()).put("landscape", landscape).put("app", "android")
+                .put("gyro_peak", motion.toDouble()).put("blur_px", blurPx))
             .put("ms", millis).put("sharp", sharp)
             .put("pose", p ?: JSONObject.NULL).put("slot", slot ?: JSONObject.NULL)
             .put("targets", targets).put("charuco", charuco ?: JSONObject.NULL)
@@ -57,6 +60,8 @@ class Shot(val n: Int, val id: String) {
             val ex = j.optJSONObject("exif"); s.orientation = ex?.optInt("orientation", 1) ?: 1; s.landscape = j.optBoolean("landscape", ex?.optBoolean("landscape", false) ?: false)
             s.fileRot = j.optInt("file_rot", 0); s.devRoll = j.optDouble("dev_roll", 0.0)
             s.sharp = j.optDouble("sharp", 0.0); s.millis = j.optLong("ms", 0)
+            ex?.let { s.exposureNs = it.optLong("exposure_ns", 0); s.iso = it.optInt("iso", 0); s.focusDist = it.optDouble("focus_diopters", 0.0).toFloat()
+                s.motion = it.optDouble("gyro_peak", 0.0).toFloat(); s.blurPx = it.optDouble("blur_px", 0.0) }
             j.optJSONObject("pose")?.let { p ->
                 val rv = p.getJSONArray("rvec"); val tv = p.getJSONArray("tvec")
                 s.pose = Pose(p.getDouble("az"), p.getDouble("el"), p.getDouble("dist_m"), DoubleArray(3) { rv.getDouble(it) }, DoubleArray(3) { tv.getDouble(it) }, p.optDouble("roll", 0.0))
@@ -76,7 +81,9 @@ class Shot(val n: Int, val id: String) {
 /** A scan session: slots, coverage and protocol bookkeeping. Mirrors the web app's logic. */
 class Session(ctx: Context, val sid: String, var name: String, var mode: String, val calib: Boolean = false) {
     val shots = ArrayList<Shot>()
-    val dir: File = File(ctx.filesDir, "sessions/$sid").apply { mkdirs() }
+    var created = System.currentTimeMillis()
+    var camera: JSONObject? = null       // what the phone reports about its lens and sensor (CameraController.describe)
+    val dir: File = File(ctx.filesDir, "sessions/$sid")      // created by the store when the first photo is saved
 
     data class Layout(val az: Int, val bands: List<Pair<Double, Double>>, val clock: List<String>, val bandName: List<String>)
 
@@ -141,11 +148,11 @@ class Session(ctx: Context, val sid: String, var name: String, var mode: String,
     }
 
     fun sessionDoc(): JSONObject = JSONObject()
-        .put("name", name).put("mode", mode).put("savePhotos", true).put("created", System.currentTimeMillis())
+        .put("name", name).put("mode", mode).put("savePhotos", true).put("created", created)
         .put("ua", "scan3d-android/0.1 " + android.os.Build.MODEL)
         .put("board", JSONObject().put("squares", JSONArray(listOf(7, 10))).put("square_m", Detector.SQUARE_M)
             .put("marker_m", Detector.MARKER_M).put("dict", "DICT_5X5_100"))
         .put("targets", JSONObject().put("dict", "DICT_4X4_250").put("marker_mm", Detector.TARGET_MM))
         .put("detect_max_px", Detector.DETECT_MAX.toInt()).put("coords", "pixels in sensor frame (EXIF orientation given)")
-        .put("device", android.os.Build.MODEL)
+        .put("device", android.os.Build.MODEL).put("camera", camera ?: JSONObject.NULL)
 }

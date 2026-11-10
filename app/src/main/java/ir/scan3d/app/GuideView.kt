@@ -61,6 +61,8 @@ class GuideView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = n
     private val pDash = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2f; pathEffect = DashPathEffect(floatArrayOf(8f, 6f), 0f) }
     private val path = Path()
 
+    init { try { androidx.core.content.res.ResourcesCompat.getFont(ctx, R.font.vazirmatn_medium)?.let { pText.typeface = it } } catch (_: Exception) { } }
+
     // ---- projection ----
     private var cx0 = 0f; private var cy0 = 0f; private var scale = 1f
     private val fwd = DoubleArray(3); private val right = DoubleArray(3); private val upv = DoubleArray(3)
