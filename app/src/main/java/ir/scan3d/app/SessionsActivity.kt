@@ -19,9 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
-import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
 
 /** Past scans and calibrations kept on the phone: resume, open the result, or delete. */
 class SessionsActivity : AppCompatActivity() {
@@ -31,6 +29,8 @@ class SessionsActivity : AppCompatActivity() {
     /** One line of the list, read from the session's files off the main thread. */
     private class Row(val sid: String, val calib: Boolean, val shots: Int, val created: Long, val state: String?, val dims: String?, val thumb: Bitmap?)
     private var rows: List<Row> = emptyList()
+    // Persian (solar Hijri) calendar with Persian digits
+    private val dateFmt = android.icu.text.SimpleDateFormat("d MMMM yyyy · HH:mm", android.icu.util.ULocale("fa_IR@calendar=persian"))
 
     private val adapter = object : BaseAdapter() {
         override fun getCount() = rows.size
@@ -42,7 +42,7 @@ class SessionsActivity : AppCompatActivity() {
             v.thumb.setImageBitmap(r.thumb)
             v.text.text = getString(if (r.calib) R.string.s_calib else R.string.s_scan) + " · " + getString(R.string.s_shots, Ui.fa(r.shots))
             v.sub.text = r.dims ?: ""; v.sub.visibility = if (r.dims == null) View.GONE else View.VISIBLE
-            v.date.text = Ui.fa(SimpleDateFormat("yyyy/MM/dd  HH:mm", Locale.US).format(Date(r.created)))
+            v.date.text = dateFmt.format(Date(r.created))
             val (label, color) = when (r.state) {
                 "done" -> (if (r.calib) R.string.s_done_calib else R.string.s_done) to R.color.ok
                 "processing" -> R.string.s_processing to R.color.accent

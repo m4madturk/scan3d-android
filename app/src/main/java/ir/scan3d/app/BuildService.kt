@@ -33,6 +33,7 @@ class BuildService : Service() {
         val sid = intent?.getStringExtra("sid") ?: return START_NOT_STICKY
         val calib = intent.getBooleanExtra("calib", false)
         val convex = intent.getBooleanExtra("convex", true)
+        val printScale = intent.getDoubleExtra("scale", 1.0).let { if (it in 0.9..1.1) it else 1.0 }
         startForeground(1, notif(getString(if (calib) R.string.processing_calib else R.string.processing_model), 0))
         runningSid = sid
         scope.launch {
@@ -79,7 +80,7 @@ class BuildService : Service() {
                     val out = Pipeline.build(shots, files, convex, prior, 0.4, { msg, p ->
                         write(resultFile, JSONObject().put("state", "processing").put("progress", p).put("message", msg))
                         nm().notify(1, notif(msg, (p * 100).toInt()))
-                    }, ::log, seg)
+                    }, ::log, seg, printScale)
                     seg.close()
                     val mesh = out.mesh; val rep = out.report
                     mesh.writeStl(File(dir, "model.stl"))

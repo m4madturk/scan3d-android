@@ -3,6 +3,7 @@ package ir.scan3d.app.engine
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
@@ -173,20 +174,25 @@ object RayFit {
                 rayMin(m, rays, i, out); r[i] = out[0]; t[i] = out[1]
             }
         }
+        // Cauchy loss c^2 ln(1 + (x/c)^2) and its reweighting factor 1 / (1 + (x/c)^2): the normal equations built
+        // from these weights follow exactly the gradient of the cost the steps are judged by
         var cost = 0.0
         for (i in 0 until n) {
             if (rays.view[i] == skipView) continue
             val x = r[i]
-            var wi = if (x > 0) 1.0 / (1.0 + (x / cOut) * (x / cOut)) else 1.0 / (1.0 + (x / cIn) * (x / cIn))
-            if (!rays.edge[i] && x >= 0) wi *= UNCONFIRMED          // only a bound: it counts when the model sticks out
-            w[i] = wi; cost += wi * x * x
+            val c = if (x > 0) cOut else cIn
+            val u = (x / c) * (x / c)
+            var wi = 1.0 / (1.0 + u); var li = c * c * ln(1.0 + u)
+            if (!rays.edge[i] && x >= 0) { wi *= UNCONFIRMED; li *= UNCONFIRMED }          // only a bound: it counts when the model sticks out
+            w[i] = wi; cost += li
         }
         val nS = stickers.size / 3
         val rs = DoubleArray(nS); val ws = DoubleArray(nS)
         val cs = max(STICKER_C, cOut)
         for (k in 0 until nS) {
             rs[k] = m.sdf(stickers[3 * k], stickers[3 * k + 1], stickers[3 * k + 2]) - STICKER_T
-            ws[k] = STICKER_W / (1.0 + (rs[k] / cs) * (rs[k] / cs)); cost += ws[k] * rs[k] * rs[k]
+            val u = (rs[k] / cs) * (rs[k] / cs)
+            ws[k] = STICKER_W / (1.0 + u); cost += STICKER_W * cs * cs * ln(1.0 + u)
         }
         val q = m.p; cost += RB_PRIOR * (q[RB] - q[RZ]) * (q[RB] - q[RZ])
         return Eval(r, t, w, rs, ws, cost)

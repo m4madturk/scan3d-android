@@ -13,10 +13,9 @@ import kotlin.math.sqrt
 /**
  * Reads a binary STL into what a renderer needs: one position and one shading normal per triangle corner.
  *
- * STL stores loose triangles with one normal each, which renders faceted. Here coincident corners are merged,
- * their face normals averaged (weighted by area), and a corner gets that smooth normal unless it differs from its
- * own face by more than the crease angle: curved surfaces look curved, and real edges (the rim of the base) stay
- * sharp.
+ * STL stores loose triangles with one normal each, which renders faceted. Here coincident corners are merged and a
+ * corner gets the area-weighted mean normal of those faces around it that lie within the crease angle of its own
+ * face: curved surfaces look curved, and real edges (the rim of the base) stay sharp.
  */
 object Stl {
     /** data: x y z nx ny nz per corner (three corners per triangle), ready for a vertex buffer. */
@@ -64,22 +63,30 @@ object Stl {
             if (id < 0) { id = nv++; map.put(key, id) }
             vid[c] = id
         }
-        val acc = FloatArray(3 * nv)
-        for (t in 0 until n) for (k in 0 until 3) { val v = 3 * vid[3 * t + k]; acc[v] += raw[3 * t]; acc[v + 1] += raw[3 * t + 1]; acc[v + 2] += raw[3 * t + 2] }
-        for (v in 0 until nv) {
-            val l = sqrt(acc[3 * v] * acc[3 * v] + acc[3 * v + 1] * acc[3 * v + 1] + acc[3 * v + 2] * acc[3 * v + 2])
-            if (l > 0f) { acc[3 * v] /= l; acc[3 * v + 1] /= l; acc[3 * v + 2] /= l }
-        }
+        // faces around every merged vertex (compressed rows)
+        val start = IntArray(nv + 1)
+        for (c in 0 until 3 * n) start[vid[c] + 1]++
+        for (v in 0 until nv) start[v + 1] += start[v]
+        val fill = start.copyOf(nv); val faces = IntArray(3 * n)
+        for (t in 0 until n) for (k in 0 until 3) { val v = vid[3 * t + k]; faces[fill[v]++] = t }
+        // a corner's normal: the area-weighted mean of the faces around its vertex that lie within the crease angle
+        // of the corner's OWN face. (Comparing the mean of all faces with the own face is not enough: at a cube
+        // corner the face with two triangles dominates the mean and would pass as "smooth".)
         val cosC = cos(Math.toRadians(creaseDeg)).toFloat()
         val out = ByteBuffer.allocateDirect(n * 18 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
         val rec = FloatArray(18)
         for (t in 0 until n) {
             val fx = unit[3 * t]; val fy = unit[3 * t + 1]; val fz = unit[3 * t + 2]
             for (k in 0 until 3) {
-                val c = 3 * t + k; val v = 3 * vid[c]
+                val c = 3 * t + k; val v = vid[c]
+                var ax = 0f; var ay = 0f; var az = 0f
+                for (q in start[v] until start[v + 1]) {
+                    val f = faces[q]
+                    if (unit[3 * f] * fx + unit[3 * f + 1] * fy + unit[3 * f + 2] * fz >= cosC) { ax += raw[3 * f]; ay += raw[3 * f + 1]; az += raw[3 * f + 2] }
+                }
+                val l = sqrt(ax * ax + ay * ay + az * az)
                 rec[6 * k] = pos[3 * c]; rec[6 * k + 1] = pos[3 * c + 1]; rec[6 * k + 2] = pos[3 * c + 2]
-                val smooth = acc[v] * fx + acc[v + 1] * fy + acc[v + 2] * fz >= cosC
-                rec[6 * k + 3] = if (smooth) acc[v] else fx; rec[6 * k + 4] = if (smooth) acc[v + 1] else fy; rec[6 * k + 5] = if (smooth) acc[v + 2] else fz
+                if (l > 0f) { rec[6 * k + 3] = ax / l; rec[6 * k + 4] = ay / l; rec[6 * k + 5] = az / l } else { rec[6 * k + 3] = fx; rec[6 * k + 4] = fy; rec[6 * k + 5] = fz }
             }
             out.put(rec)
         }

@@ -54,7 +54,7 @@
     <!-- controls -->
     <LinearLayout android:id="@+id/panel" android:orientation="vertical"
         android:layout_width="0dp" android:layout_height="wrap_content" android:background="@color/bg"
-        android:paddingStart="12dp" android:paddingEnd="12dp" android:paddingTop="8dp" android:paddingBottom="8dp" android:layoutDirection="rtl"
+        android:paddingStart="12dp" android:paddingEnd="12dp" android:paddingTop="6dp" android:paddingBottom="4dp" android:layoutDirection="rtl"
         app:layout_constraintBottom_toBottomOf="parent" app:layout_constraintStart_toStartOf="parent" app:layout_constraintEnd_toEndOf="parent">
 
         <!-- guidance: 3D view of where to hold the phone + what the next photo is + how to move -->
@@ -78,6 +78,10 @@
             <TextView android:id="@+id/chipLock" style="@style/Scan3D.Chip" />
         </LinearLayout>
 
+        <!-- appears once there are enough photos; sits above the shutter so the shutter never moves -->
+        <Button android:id="@+id/btnBuild" style="@style/Scan3D.Button" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp"
+            android:text="@string/build_model" android:visibility="gone" />
+
         <!-- photos so far | shutter | automatic -->
         <androidx.constraintlayout.widget.ConstraintLayout android:layout_width="match_parent" android:layout_height="88dp" android:layout_marginTop="2dp">
             <ir.scan3d.app.ShutterView android:id="@+id/btnShot" android:layout_width="76dp" android:layout_height="76dp" android:contentDescription="@string/shoot"
@@ -95,6 +99,5 @@
                 app:layout_constraintTop_toTopOf="parent" app:layout_constraintBottom_toBottomOf="parent" app:layout_constraintEnd_toEndOf="parent" />
         </androidx.constraintlayout.widget.ConstraintLayout>
 
-        <Button android:id="@+id/btnBuild" style="@style/Scan3D.Button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/build_model" />
     </LinearLayout>
 </androidx.constraintlayout.widget.ConstraintLayout>

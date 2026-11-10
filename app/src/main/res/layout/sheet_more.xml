@@ -18,14 +18,17 @@
     <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/swLock" style="@style/Scan3D.SheetRow" android:text="@string/sw_lock" />
     <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/swTorch" style="@style/Scan3D.SheetRow" android:text="@string/sw_torch" />
     <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/swConvex" style="@style/Scan3D.SheetRow" android:text="@string/sw_convex" />
+
+    <TextView style="@style/Scan3D.Label" android:text="@string/lbl_accuracy" />
+    <TextView android:id="@+id/rowScale" style="@style/Scan3D.SheetRow" android:text="@string/row_scale_unset" />
+    <TextView android:id="@+id/rowMode" style="@style/Scan3D.SheetRow" android:text="@string/to_calib" />
     <TextView android:id="@+id/profile" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:paddingStart="20dp" android:paddingEnd="20dp" android:paddingTop="4dp" android:textColor="@color/text_dim" android:textSize="12sp" />
+        android:paddingStart="20dp" android:paddingEnd="20dp" android:paddingBottom="4dp" android:textColor="@color/text_dim" android:textSize="12sp" />
 
     <TextView style="@style/Scan3D.Label" android:text="@string/lbl_session" />
     <TextView android:id="@+id/rowResult" style="@style/Scan3D.SheetRow" android:text="@string/row_result" />
     <TextView android:id="@+id/rowNew" style="@style/Scan3D.SheetRow" android:text="@string/new_scan" />
     <TextView android:id="@+id/rowSessions" style="@style/Scan3D.SheetRow" android:text="@string/sessions" />
-    <TextView android:id="@+id/rowMode" style="@style/Scan3D.SheetRow" android:text="@string/to_calib" />
     <TextView android:id="@+id/rowHelp" style="@style/Scan3D.SheetRow" android:text="@string/row_help" />
     <TextView android:id="@+id/sid" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingStart="20dp" android:paddingEnd="20dp" android:paddingTop="8dp"
         android:textColor="@color/text_faint" android:textSize="11sp" android:fontFamily="monospace" android:textDirection="ltr" android:gravity="start" />

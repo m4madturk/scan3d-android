@@ -136,7 +136,8 @@ class ResultActivity : AppCompatActivity() {
             b.grade.setTextColor(col(if (within >= 0.6) R.color.ok else R.color.warn))
             b.dimsNote.text = getString(R.string.dims_note, Ui.num(fit.optDouble("rc")), Ui.num(fit.optDouble("rz")), Ui.num(fit.optDouble("rb")),
                 Ui.num(100 * within, 0), Ui.fa(fit.optInt("edges")), Ui.num(fit.optDouble("median_mm"), 2)) +
-                (if (!sw.isNaN()) "\n" + getString(R.string.dims_pm_note) else "")
+                (if (!sw.isNaN()) "\n" + getString(R.string.dims_pm_note) else "") +
+                (if (d.optDouble("print_scale", 1.0) == 1.0) "\n" + getString(R.string.dims_scale_note) else "")
         } else {
             val a = d.optJSONArray("size_mm")
             val x = a?.optDouble(0) ?: 0.0; val y = a?.optDouble(1) ?: 0.0; val z = a?.optDouble(2) ?: 0.0
@@ -172,6 +173,7 @@ class ResultActivity : AppCompatActivity() {
         info.append(getString(R.string.d_sigma0, Ui.num(s0, 2))).append('\n')
         if (d.optDouble("focal_px", 0.0) > 0) info.append(getString(R.string.d_focal, Ui.num(d.optDouble("focal_px"), 0))).append('\n')
         info.append(getString(R.string.d_bend, Ui.num(bend))).append('\n')
+        info.append(getString(R.string.d_scale, Ui.num(100 * d.optDouble("print_scale", 1.0), 2))).append('\n')
         fit?.let { f ->
             info.append(getString(R.string.d_tilt, Ui.num(f.optDouble("tilt_deg")))).append('\n')
             info.append(getString(R.string.d_edges, Ui.fa(f.optInt("edges")), Ui.fa(f.optInt("views")))).append('\n')

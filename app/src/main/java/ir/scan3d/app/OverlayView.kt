@@ -110,8 +110,11 @@ class OverlayView(ctx: Context, attrs: AttributeSet?) : View(ctx, attrs) {
         for (j in 0 until gy) for (i in 0 until gx) {
             val n = cells[j * gx + i]
             val l = img.left + i * cw; val t = img.top + j * ch
-            if (n < 3) { pFill.color = if (n > 0) Color.argb(36, 240, 180, 76) else Color.argb(46, 240, 180, 76); c.drawRect(l + 1.5f * d, t + 1.5f * d, l + cw - 1.5f * d, t + ch - 1.5f * d, pFill) }
-            else {      // covered: a small tick in the corner, nothing over the picture
+            if (n < 3) {     // still to cover: an amber ring in the middle of the cell (filled once the board has touched it)
+                pStroke.color = amber; pStroke.alpha = 230; pStroke.strokeWidth = 2f * d
+                c.drawCircle(l + cw / 2, t + ch / 2, 6f * d, pStroke)
+                if (n > 0) { pFill.color = amber; pFill.alpha = 230; c.drawCircle(l + cw / 2, t + ch / 2, 2.5f * d, pFill) }
+            } else {         // covered: a small tick in the corner, nothing over the picture
                 pStroke.color = teal; pStroke.alpha = 230; pStroke.strokeWidth = 2f * d
                 val x = l + cw - 14f * d; val y = t + 12f * d
                 c.drawLine(x - 4f * d, y, x - 1f * d, y + 3f * d, pStroke); c.drawLine(x - 1f * d, y + 3f * d, x + 5f * d, y - 4f * d, pStroke)

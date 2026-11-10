@@ -129,7 +129,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         b.guide.setOnClickListener { toggleGuideSize() }
         b.guide.setOnLongClickListener { openHelp(if (mode == "calib") 6 else 2); true }
         if (!prefs.getBoolean("tutorial_seen", false)) { prefs.edit().putBoolean("tutorial_seen", true).apply(); startActivity(Intent(this, TutorialActivity::class.java)) }
-        b.guide.compact = true
+        b.guide.compact = true; b.guide.showClock = false
+        guideSmall = Ui.dp(this, if (resources.configuration.screenHeightDp < 700) 72 else 96)      // short screens: the picture needs the room
+        (b.guide.layoutParams as LinearLayout.LayoutParams).let { it.width = guideSmall; it.height = guideSmall; b.guide.layoutParams = it }
 
         val sid = intent.getStringExtra("sid")
         if (intent.getStringExtra("mode") == "calib") mode = "calib"
@@ -574,7 +576,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             try { store.write(sid, text); File(store.sessionDir(sid), "result.json").delete() } catch (_: Exception) {}
             runOnUiThread {
                 if (isDestroyed) return@runOnUiThread
-                ContextCompat.startForegroundService(this, Intent(this, BuildService::class.java).putExtra("sid", sid).putExtra("calib", isCalib).putExtra("convex", convex))
+                ContextCompat.startForegroundService(this, Intent(this, BuildService::class.java).putExtra("sid", sid).putExtra("calib", isCalib).putExtra("convex", convex)
+                    .putExtra("scale", prefs.getFloat("print_scale", 1f).toDouble()))
                 openResult()
             }
         }
@@ -602,6 +605,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         v.swConvex.isChecked = convex
         v.swConvex.setOnCheckedChangeListener { _, on -> convex = on; prefs.edit().putBoolean("convex", on).apply() }
         v.profile.text = store.profileSummary()?.let { getString(R.string.profile_fmt, it) } ?: getString(R.string.no_profile)
+        fun scaleLabel() { val k = prefs.getFloat("print_scale", 1f)
+            v.rowScale.text = if (prefs.contains("print_scale")) getString(R.string.row_scale_set, Ui.num(SCALE_SPAN_MM * k, 1)) else getString(R.string.row_scale_unset) }
+        scaleLabel()
+        v.rowScale.setOnClickListener { askPrintScale { scaleLabel() } }
         v.rowResult.visibility = vis(store.resultState(s.sid) != null)
         v.rowResult.setOnClickListener { dlg.dismiss(); openResult() }
         v.rowNew.text = getString(if (scan) R.string.new_scan else R.string.new_calib)
@@ -617,6 +624,30 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         v.rowHelp.setOnClickListener { dlg.dismiss(); openHelp(if (scan) 0 else 6) }
         v.sid.text = s.sid
         dlg.show()
+    }
+
+    /**
+     * The printed sheet is the ruler of every scan, and printers do not print at exactly 100 %. The user measures
+     * five squares (nominally 125 mm) once per print; every model is scaled by measured / nominal.
+     */
+    private fun askPrintScale(done: () -> Unit) {
+        val input = android.widget.EditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+            hint = "125.0"; textDirection = View.TEXT_DIRECTION_LTR; gravity = android.view.Gravity.CENTER; textSize = 20f
+            if (prefs.contains("print_scale")) setText(String.format(java.util.Locale.US, "%.1f", SCALE_SPAN_MM * prefs.getFloat("print_scale", 1f)))
+        }
+        val box = android.widget.FrameLayout(this).apply { val p = Ui.dp(this@MainActivity, 24); setPadding(p, Ui.dp(this@MainActivity, 8), p, 0); addView(input) }
+        AlertDialog.Builder(this).setTitle(getString(R.string.scale_title)).setMessage(getString(R.string.scale_msg)).setView(box)
+            .setPositiveButton(getString(R.string.scale_save)) { _, _ ->
+                // Persian or Latin digits, any decimal mark
+                val txt = input.text.toString().map { ch -> when (ch) { in '۰'..'۹' -> '0' + (ch - '۰'); in '٠'..'٩' -> '0' + (ch - '٠'); '٫', ',', '،' -> '.'; else -> ch } }.joinToString("")
+                val mm = txt.toDoubleOrNull()
+                if (mm == null || mm < SCALE_SPAN_MM * 0.95 || mm > SCALE_SPAN_MM * 1.05) showStatus(getString(R.string.scale_bad), R.color.warn)
+                else { prefs.edit().putFloat("print_scale", (mm / SCALE_SPAN_MM).toFloat()).apply(); showStatus(getString(R.string.scale_ok, Ui.num(100 * mm / SCALE_SPAN_MM, 2)), R.color.ok) }
+                done()
+            }
+            .setNeutralButton(getString(R.string.scale_clear)) { _, _ -> prefs.edit().remove("print_scale").apply(); done() }
+            .setNegativeButton(getString(R.string.no), null).show()
     }
 
     /** The photos of this session: what was measured in each, and a way to throw the bad ones away. */
@@ -673,7 +704,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             b.guide.mode = GuideView.Mode.CALIB; b.guide.slots = emptyMap(); b.guide.keyframes = emptyList()
             b.guide.target = GuideView.calibPose(st.target)
             b.count.text = getString(R.string.calib_count, fa(st.total), fa(st.rolled), fa(st.cellsCovered), fa(st.cellsTotal))
-            b.btnBuild.text = getString(R.string.compute_calib_n, fa(st.total)); b.btnBuild.alpha = if (st.total >= 15) 1f else 0.45f
+            b.btnBuild.text = getString(R.string.compute_calib_n, fa(st.total)); b.btnBuild.visibility = if (st.total >= 15) View.VISIBLE else View.GONE
             updateHint()
             b.overlay.invalidate(); return
         }
@@ -685,7 +716,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val taken = s.takenSlots().size
         val L = s.layout()
         b.count.text = if (L != null) getString(R.string.count_fmt, fa(taken), fa(L.az * L.bands.size)) else getString(R.string.count_free, fa(done.size))
-        b.btnBuild.text = getString(R.string.build_model_n, fa(done.size)); b.btnBuild.alpha = if (done.size >= 8) 1f else 0.45f
+        b.btnBuild.text = getString(R.string.build_model_n, fa(done.size)); b.btnBuild.visibility = if (done.size >= 8) View.VISIBLE else View.GONE
         val rotated = done.count { it.landscape }; val low = done.count { it.pose != null && it.pose!!.el < 30 }
         val cov = s.coverage(); val weak = cov.filter { !it.ready }
         val nk = s.nextSlot()
@@ -704,6 +735,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private var scanBase = ""
     private var guideLarge = false
+    private var guideSmall = 0
 
     /** Tap on the little 3D guide: enlarge it to the full panel width (text moves below), tap again to shrink. */
     private fun toggleGuideSize() {
@@ -711,12 +743,12 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val lp = b.guide.layoutParams as LinearLayout.LayoutParams
         if (guideLarge) {
             b.hintBox.orientation = LinearLayout.VERTICAL
-            lp.width = LinearLayout.LayoutParams.MATCH_PARENT; lp.height = Ui.dp(this, 230)
-            b.guide.compact = false
+            lp.width = LinearLayout.LayoutParams.MATCH_PARENT; lp.height = Ui.dp(this, if (resources.configuration.screenHeightDp < 700) 170 else 230)
+            b.guide.compact = false; b.guide.showClock = true
         } else {
             b.hintBox.orientation = LinearLayout.HORIZONTAL
-            lp.width = Ui.dp(this, 96); lp.height = Ui.dp(this, 96)
-            b.guide.compact = true
+            lp.width = guideSmall; lp.height = guideSmall
+            b.guide.compact = true; b.guide.showClock = false
         }
         (b.hintTexts.layoutParams as LinearLayout.LayoutParams).let { t ->
             t.width = if (guideLarge) LinearLayout.LayoutParams.MATCH_PARENT else 0; t.weight = if (guideLarge) 0f else 1f; b.hintTexts.layoutParams = t }
@@ -764,5 +796,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         const val STEADY_MS = 120L              // the phone must have been this still for this long before the shutter fires
         const val STEADY_TIMEOUT_MS = 1500L     // ...but the shutter never waits longer than this
         const val AUTO_STEADY_MS = 350L         // automatic shutter: a little more patience
+        const val SCALE_SPAN_MM = 125.0         // five squares of the sheet: what the user measures to get the print scale
     }
 }

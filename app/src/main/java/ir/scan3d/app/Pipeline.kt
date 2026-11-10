@@ -40,7 +40,8 @@ object Pipeline {
 
     class Report(val sizeMm: DoubleArray, val volumeCm3: Double, val views: Int, val planes: Int, val sigma0: Double,
                  val stickers: Int, val frameworkFrames: Int, val warnings: List<String>, val seconds: Double, val triangles: Int,
-                 val fit: Fit? = null, val sheetBendMm: Double = 0.0, val focalPx: Double = 0.0, val frameRms: DoubleArray = DoubleArray(0))
+                 val fit: Fit? = null, val sheetBendMm: Double = 0.0, val focalPx: Double = 0.0, val frameRms: DoubleArray = DoubleArray(0),
+                 val printScale: Double = 1.0)
 
     /** The scan hull, the clean parametric model (when the contours fit one) and the numbers. */
     class Output(val mesh: Mesh, val clean: Mesh?, val report: Report)
@@ -83,9 +84,14 @@ object Pipeline {
     /**
      * Build the model. shots must all share one sensor size. Returns the mesh in mm (centred on xy, resting on
      * z = 0), the clean model when there is one, and the report.
+     *
+     * printScale: measured size of the printed sheet over its nominal size (printers rarely print at exactly
+     * 100 %). The whole reconstruction is a similarity of the sheet, so it is solved in nominal millimetres and
+     * every length is multiplied by this factor at the end: a sheet printed 0.5 % small would otherwise make a
+     * 66 mm object read 66.33.
      */
     fun build(shots: List<Shot>, files: List<File>, convex: Boolean, prior: CameraPrior?, voxel: Double,
-              progress: (String, Double) -> Unit, log: (String) -> Unit, segmenter: Segmenter? = null): Output {
+              progress: (String, Double) -> Unit, log: (String) -> Unit, segmenter: Segmenter? = null, printScale: Double = 1.0): Output {
         val t0 = System.currentTimeMillis()
         var tStage = t0
         fun stage(name: String) { val now = System.currentTimeMillis(); log("[time] $name: ${now - tStage} ms"); tStage = now }
@@ -213,10 +219,19 @@ object Pipeline {
         if (smeared > 0) warnings.add("$smeared photo(s) were taken while the phone was moving (smear above 2 px)")
         val bend = warp.peakToValley()
         if (bend > 1.0) warnings.add("the sheet is bent by %.1f mm (it was measured and modelled; a rigid flat board is still better)".format(bend))
-        val rep = Report(size, mesh.volume() / 1000, views.size, planes.size, geo.sigma0, geo.stickers.size, geo.frameworkFrames, warnings,
-            (System.currentTimeMillis() - t0) / 1000.0, mesh.triangleCount, fitOut, bend, geo.camera.f, geo.frameRms)
+        // everything so far is in nominal sheet millimetres: apply the measured print scale to every length
+        val k = printScale
+        if (k != 1.0) log("print scale %.4f applied to all lengths".format(k))
+        val fitScaled = fitOut?.let { f ->
+            val lengths = intArrayOf(RayFit.CX, RayFit.CY, RayFit.W, RayFit.L, RayFit.H, RayFit.RC, RayFit.RZ, RayFit.RB)
+            val p = f.p.copyOf(); for (i in lengths) p[i] *= k
+            val sg = f.sigma?.copyOf()?.also { s -> for (i in lengths) s[i] *= k }
+            Fit(p, sg, f.tiltDeg, f.within, f.medianMm * k, f.rays, f.edges, f.views, f.stickers)
+        }
+        val rep = Report(DoubleArray(3) { size[it] * k }, mesh.volume() * k * k * k / 1000, views.size, planes.size, geo.sigma0, geo.stickers.size, geo.frameworkFrames, warnings,
+            (System.currentTimeMillis() - t0) / 1000.0, mesh.triangleCount, fitScaled, bend * k, geo.camera.f, geo.frameRms, k)
         progress("تمام", 1.0)
-        return Output(centred, clean, rep)
+        return Output(centred.scaled(k), clean?.scaled(k), rep)
     }
 
     /** One photo: silhouette (structure test + AI), sanity check against the stickers, contour edges. Thread-safe. */
@@ -339,7 +354,7 @@ object Pipeline {
             .put("size_mm", JSONArray(r.sizeMm.toList())).put("volume_cm3", r.volumeCm3).put("views_used", r.views)
             .put("marker_planes", r.planes).put("sigma0_px", r.sigma0).put("stickers", r.stickers).put("framework_frames", r.frameworkFrames)
             .put("warnings", JSONArray(r.warnings)).put("seconds", r.seconds).put("triangles", r.triangles)
-            .put("sheet_bend_mm", r.sheetBendMm).put("focal_px", r.focalPx)
+            .put("sheet_bend_mm", r.sheetBendMm).put("focal_px", r.focalPx).put("print_scale", r.printScale)
             .put("frame_rms_px", JSONArray(r.frameRms.map { if (it.isNaN()) -1.0 else it }))
         r.fit?.let { f ->
             val p = f.p

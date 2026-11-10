@@ -143,6 +143,9 @@ class Mesh(val verts: FloatArray, val tris: IntArray) {
         return Mesh(v, tris)
     }
 
+    /** Same mesh, every coordinate multiplied by k (the print scale of the sheet). */
+    fun scaled(k: Double): Mesh = if (k == 1.0) this else Mesh(FloatArray(verts.size) { (verts[it] * k).toFloat() }, tris)
+
     /** Same mesh with every triangle's winding reversed. */
     fun flipped(): Mesh = Mesh(verts, IntArray(tris.size) { val t = it / 3; when (it % 3) { 0 -> tris[3 * t]; 1 -> tris[3 * t + 2]; else -> tris[3 * t + 1] } })
 
