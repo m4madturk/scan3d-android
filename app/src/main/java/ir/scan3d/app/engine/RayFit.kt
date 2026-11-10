@@ -105,8 +105,14 @@ object RayFit {
             cx = p[CX]; cy = p[CY]; cz = zs + rest
         }
 
-        /** Tilt of the body relative to the sheet, degrees. */
+        /** Tilt of the body's axis from the z axis, degrees. */
         val tiltDeg: Double get() = Math.toDegrees(Math.acos(r22.coerceIn(-1.0, 1.0)))
+
+        /** Angle (degrees) between the body's axis and a given direction (nx, ny, nz), e.g. the normal of the sheet under it. */
+        fun tiltFrom(nx: Double, ny: Double, nz: Double): Double {
+            val n = sqrt(nx * nx + ny * ny + nz * nz)
+            return Math.toDegrees(Math.acos(((r02 * nx + r12 * ny + r22 * nz) / n).coerceIn(-1.0, 1.0)))
+        }
 
         /** Centre of the body (for bounding the ray search) and its bounding radius. */
         val mx: Double get() = cx + r02 * h / 2

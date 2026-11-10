@@ -183,6 +183,7 @@
     <string name="scale_ok">مقیاس چاپ %1$s٪ ذخیره شد و در مدل‌های بعدی اعمال می‌شود.</string>
     <string name="d_scale">مقیاس چاپ صفحه: %1$s٪</string>
     <string name="dims_scale_note">مقیاس چاپ صفحه اندازه‌گیری نشده است (منوی ⋯ ← مقیاس چاپ صفحه)؛ نیم درصد خطای چاپ یعنی ۰٫۳ میلی‌متر روی ۶۰ میلی‌متر.</string>
+    <string name="sw_short">نوردهی کوتاه هنگام قفل (ضد تاری، کمی نویز بیشتر)</string>
     <!-- tutorial -->
     <string name="t_next">بعدی</string>
     <string name="t_prev">قبلی</string>

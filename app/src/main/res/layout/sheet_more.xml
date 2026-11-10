@@ -16,6 +16,7 @@
 
     <TextView style="@style/Scan3D.Label" android:text="@string/lbl_camera" />
     <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/swLock" style="@style/Scan3D.SheetRow" android:text="@string/sw_lock" />
+    <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/swShort" style="@style/Scan3D.SheetRow" android:text="@string/sw_short" />
     <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/swTorch" style="@style/Scan3D.SheetRow" android:text="@string/sw_torch" />
     <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/swConvex" style="@style/Scan3D.SheetRow" android:text="@string/sw_convex" />
 

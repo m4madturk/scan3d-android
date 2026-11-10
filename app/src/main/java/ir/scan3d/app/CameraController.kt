@@ -34,7 +34,9 @@ import java.util.concurrent.Executors
  * Metrology-minded camera setup, which is what a web page cannot do:
  *   - main (1x) lens only, no zoom
  *   - video/optical stabilisation OFF (it warps frames and changes the effective intrinsics)
- *   - exposure and white balance locked once the scene is framed
+ *   - exposure and white balance locked once the scene is framed; where the sensor can be driven by hand the
+ *     lock also shortens the exposure to 1/100 s (ISO raised to match): hand shake smears a long exposure by
+ *     several pixels, and a little more sensor noise costs far less accuracy than that
  *   - focus locked after the first scan photo (a changing focus changes the focal length)
  *   - every capture reports exposure time, ISO and focus distance
  *   - highest JPEG resolution the sensor offers
@@ -52,6 +54,11 @@ class CameraController(private val ctx: Context) {
     var sensorOrientation = 90; private set
     var sensorSize: Size? = null; private set
     var locked = false; private set
+    /** Shorten the exposure when locking (needs a sensor with manual control); set from the user's preference. */
+    var shortExposure = true
+    /** True while the lock holds a hand-set exposure (false: plain auto-exposure lock). */
+    var manualExposure = false; private set
+    private var manualOk = false; private var isoMax = 0
     var info: org.json.JSONObject? = null; private set     // lens / sensor facts for the session file
 
     fun start(owner: LifecycleOwner, previewView: PreviewView, analyzer: (ImageProxy) -> Unit, onReady: () -> Unit) {
@@ -112,6 +119,8 @@ class CameraController(private val ctx: Context) {
             val px = info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)
             val streams = info.getCameraCharacteristic(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
             val jpeg = streams?.getOutputSizes(ImageFormat.JPEG)?.maxByOrNull { it.width.toLong() * it.height }
+            manualOk = info.getCameraCharacteristic(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)?.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR) == true
+            info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)?.let { isoMax = it.upper }
             sensorSize = jpeg ?: px
             if (fl != null && fl.isNotEmpty() && ps != null && px != null && sensorSize != null) {
                 // focal length in pixels of the full-resolution JPEG (sensor crop may differ slightly; a guess is enough)
@@ -131,7 +140,7 @@ class CameraController(private val ctx: Context) {
             info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE)?.let { j.put("min_focus_diopters", it.toDouble()) }
             info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE)?.let { j.put("timestamp_source", it) }
             info.getCameraCharacteristic(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)?.let { j.put("hardware_level", it) }
-            j.put("sensor_orientation", sensorOrientation)
+            j.put("sensor_orientation", sensorOrientation).put("manual_sensor", manualOk).put("iso_max", isoMax)
             this.info = j
         } catch (e: Exception) { Log.w("Scan3D", "characteristics: $e") }
     }
@@ -144,12 +153,25 @@ class CameraController(private val ctx: Context) {
     fun lock(focusDiopters: Float? = null) {
         val cam = camera ?: return
         val c2 = Camera2CameraControl.from(cam.cameraControl)
-        c2.setCaptureRequestOptions(CaptureRequestOptions.Builder()
-            .setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, true)
+        val b = CaptureRequestOptions.Builder()
             .setCaptureRequestOption(CaptureRequest.CONTROL_AWB_LOCK, true)
             .setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_OFF)
             .setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, focusDiopters ?: lastFocus)
-            .build())
+        val exp = lastExposureNs; val iso = lastIso
+        if (shortExposure && manualOk && isoMax > 0 && iso > 0 && exp > MAX_EXPOSURE_NS) {
+            // same brightness (exposure time x ISO), shorter exposure: ISO up, but not beyond what the sensor does cleanly
+            val isoNew = Math.round(iso.toDouble() * exp / MAX_EXPOSURE_NS).toInt().coerceAtMost(minOf(isoMax, MAX_ISO)).coerceAtLeast(iso)
+            val expNew = Math.round(exp.toDouble() * iso / isoNew)
+            b.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
+                .setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, expNew)
+                .setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, isoNew)
+            manualExposure = true
+            Log.i("Scan3D", "lock: exposure ${exp / 1000} us ISO $iso -> ${expNew / 1000} us ISO $isoNew")
+        } else {
+            b.setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, true)
+            manualExposure = false
+        }
+        c2.setCaptureRequestOptions(b.build())
         locked = true
     }
 
@@ -157,11 +179,18 @@ class CameraController(private val ctx: Context) {
         if (!locked) return
         val cam = camera ?: return
         Camera2CameraControl.from(cam.cameraControl).setCaptureRequestOptions(CaptureRequestOptions.Builder()
+            .setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON)
             .setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, false)
             .setCaptureRequestOption(CaptureRequest.CONTROL_AWB_LOCK, false)
             .setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
             .build())
-        locked = false
+        locked = false; manualExposure = false
+    }
+
+    companion object {
+        /** 1/100 s: short enough for a steady hand (under a pixel of smear), and one full flicker period of 50 Hz mains lighting. */
+        const val MAX_EXPOSURE_NS = 10_000_000L
+        const val MAX_ISO = 3200
     }
 
     fun torch(on: Boolean) { camera?.cameraControl?.enableTorch(on) }

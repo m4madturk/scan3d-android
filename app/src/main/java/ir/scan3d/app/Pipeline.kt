@@ -199,17 +199,21 @@ object Pipeline {
                 if (r == null) log("clean model: only ${rays.n} contour rays, not enough")
                 else {
                     val p = RayFit.canonical(r.p)
-                    log("clean model: %.2f x %.2f x %.2f mm, corner R %.1f, top edge R %.1f, bottom edge R %.1f, yaw %.1f deg, tilt %.1f deg".format(
-                        p[RayFit.W], p[RayFit.L], p[RayFit.H], p[RayFit.RC], p[RayFit.RZ], p[RayFit.RB], Math.toDegrees(p[RayFit.TH]), r.tiltDeg))
+                    // "not lying flat" means tilted against the sheet UNDER the object: on a bent sheet that is not the board's z axis
+                    val ox = r.p[RayFit.CX]; val oy = r.p[RayFit.CY]
+                    val gx = (warp.height(ox + 1.0, oy) - warp.height(ox - 1.0, oy)) / 2; val gy = (warp.height(ox, oy + 1.0) - warp.height(ox, oy - 1.0)) / 2
+                    val tilt = RayFit.Model(r.p, zs).tiltFrom(-gx, -gy, 1.0)
+                    log("clean model: %.2f x %.2f x %.2f mm, corner R %.1f, top edge R %.1f, bottom edge R %.1f, yaw %.1f deg, tilt %.1f deg against the sheet under it (%.1f against the board axis)".format(
+                        p[RayFit.W], p[RayFit.L], p[RayFit.H], p[RayFit.RC], p[RayFit.RZ], p[RayFit.RB], Math.toDegrees(p[RayFit.TH]), tilt, r.tiltDeg))
                     r.sigma?.let { s -> log("  repeatability (leave one photo out): W %.2f  L %.2f  H %.2f  corner R %.2f mm".format(s[RayFit.W], s[RayFit.L], s[RayFit.H], s[RayFit.RC])) }
                     if (r.stickerResiduals.isNotEmpty()) log("  sticker centres vs surface (mm): " + r.stickerResiduals.joinToString(" ") { "%+.2f".format(it) })
                     if (r.within >= FIT_MIN && r.edges >= 150 && r.views >= 4) {
                         clean = RayFit.mesh(p).translated(dx, dy, 0f)
                         // sigma in canonical order: W/L may have been swapped
                         val sg = r.sigma?.let { s -> if (r.p[RayFit.L] > r.p[RayFit.W]) s.copyOf().also { c -> c[RayFit.W] = s[RayFit.L]; c[RayFit.L] = s[RayFit.W] } else s }
-                        fitOut = Fit(p, sg, r.tiltDeg, r.within, r.medianAbs, r.rays, r.edges, r.views, good.size)
-                        if (r.tiltDeg > 2.0) warnings.add("object tilted %.1f deg on the sheet: it is not lying flat, so its height is uncertain by about %.1f mm".format(
-                            r.tiltDeg, 0.5 * max(p[RayFit.W], p[RayFit.L]) * Math.sin(Math.toRadians(r.tiltDeg))))
+                        fitOut = Fit(p, sg, tilt, r.within, r.medianAbs, r.rays, r.edges, r.views, good.size)
+                        if (tilt > 2.0) warnings.add("object tilted %.1f deg on the sheet: it is not lying flat, so its height is uncertain by about %.1f mm".format(
+                            tilt, 0.5 * max(p[RayFit.W], p[RayFit.L]) * Math.sin(Math.toRadians(tilt))))
                     } else log("clean model rejected: %.0f%% of %d edges within %.1f mm (need %.0f%%, 150 edges, 4 views)".format(100 * r.within, r.edges, RayFit.TOL_MM, 100 * FIT_MIN))
                 }
             }

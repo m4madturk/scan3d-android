@@ -116,6 +116,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         Ui.marginAboveNavBar(b.panel)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         cam = CameraController(this); store = Store(this)
+        cam.shortExposure = prefs.getBoolean("short_exposure", true)
         if (!OpenCVLoader.initLocal()) { toast("OpenCV failed to load"); finish(); return }
         convex = prefs.getBoolean("convex", true)
 
@@ -339,11 +340,17 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     // ---------------- capture ----------------
+    private var waitCalmest = Float.MAX_VALUE
     private val steadyWait = object : Runnable {
         override fun run() {
             if (waitingSince == 0L) return
-            val now = SystemClock.elapsedRealtime()
-            if (now - lastShakeAt >= STEADY_MS || now - waitingSince >= STEADY_TIMEOUT_MS) { waitingSince = 0L; capture() }
+            val now = SystemClock.elapsedRealtime(); val r = gyroRate
+            if (r < waitCalmest) waitCalmest = r
+            // fire when the smear budget is met; or, if this hand in this light never meets it, at a moment as calm as
+            // the calmest seen so far (after watching for a little while); or at the time limit
+            val steady = now - lastShakeAt >= STEADY_MS
+            val calmAsItGets = now - waitingSince >= 400 && r <= 1.3f * waitCalmest + 0.002f
+            if (steady || calmAsItGets || now - waitingSince >= STEADY_TIMEOUT_MS) { waitingSince = 0L; capture() }
             else b.btnShot.postDelayed(this, 16)
         }
     }
@@ -353,7 +360,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         if (busy || waitingSince != 0L || session == null || cam.imageCapture == null) return
         val now = SystemClock.elapsedRealtime()
         if (now - lastShakeAt >= STEADY_MS) { capture(); return }
-        waitingSince = now; b.btnShot.state = ShutterView.State.STEADY
+        waitingSince = now; waitCalmest = Float.MAX_VALUE; b.btnShot.state = ShutterView.State.STEADY
         showStatus(getString(R.string.steadying), sticky = true)
         b.btnShot.post(steadyWait)
     }
@@ -593,13 +600,18 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val dlg = BottomSheetDialog(this); val v = SheetMoreBinding.inflate(layoutInflater); dlg.setContentView(v.root)
         dlg.behavior.skipCollapsed = true; dlg.behavior.state = BottomSheetBehavior.STATE_EXPANDED
         val scan = mode == "scan"; val vis = { on: Boolean -> if (on) View.VISIBLE else View.GONE }
-        v.lblAngles.visibility = vis(scan); v.angleRow.visibility = vis(scan); v.swConvex.visibility = vis(scan); v.swLock.visibility = vis(scan)
+        v.lblAngles.visibility = vis(scan); v.angleRow.visibility = vis(scan); v.swConvex.visibility = vis(scan); v.swLock.visibility = vis(scan); v.swShort.visibility = vis(scan)
         fun mark() { v.mode18.isSelected = s.mode == "18"; v.mode8.isSelected = s.mode == "8"; v.modeFree.isSelected = s.mode == "free" }
         fun pick(m: String) { s.mode = m; s.shots.forEach { it.slotKey = s.slotOf(it.pose) }; mark(); persist(); refresh() }
         mark()
         v.mode18.setOnClickListener { pick("18") }; v.mode8.setOnClickListener { pick("8") }; v.modeFree.setOnClickListener { pick("free") }
         v.swLock.isChecked = cam.locked
         v.swLock.setOnCheckedChangeListener { _, on -> if (on) cam.lock(sessionFocus()) else cam.unlock(); autoLockDone = true; renderChips() }
+        v.swShort.isChecked = cam.shortExposure
+        v.swShort.setOnCheckedChangeListener { _, on ->
+            cam.shortExposure = on; prefs.edit().putBoolean("short_exposure", on).apply()
+            cam.unlock(); autoLockDone = false; renderChips()             // locked again, the new way, at the next steady framing
+        }
         v.swTorch.isChecked = torch
         v.swTorch.setOnCheckedChangeListener { _, on -> torch = on; cam.torch(on) }
         v.swConvex.isChecked = convex
