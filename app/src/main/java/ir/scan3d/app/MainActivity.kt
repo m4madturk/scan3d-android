@@ -613,7 +613,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             cam.unlock(); autoLockDone = false; renderChips()             // locked again, the new way, at the next steady framing
         }
         v.swTorch.isChecked = torch
-        v.swTorch.setOnCheckedChangeListener { _, on -> torch = on; cam.torch(on) }
+        v.swTorch.setOnCheckedChangeListener { _, on ->
+            torch = on; cam.torch(on)
+            if (cam.locked) { cam.unlock(); autoLockDone = false; renderChips() }      // the light changed: lock again at the next steady framing
+        }
         v.swConvex.isChecked = convex
         v.swConvex.setOnCheckedChangeListener { _, on -> convex = on; prefs.edit().putBoolean("convex", on).apply() }
         v.profile.text = store.profileSummary()?.let { getString(R.string.profile_fmt, it) } ?: getString(R.string.no_profile)

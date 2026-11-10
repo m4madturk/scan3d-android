@@ -96,7 +96,7 @@ class ScreenshotTest {
     @Test fun mainCalib() {
         noTutorial()
         ActivityScenario.launch<MainActivity>(Intent(ctx, MainActivity::class.java).putExtra("mode", "calib").putExtra("demoPose", doubleArrayOf(180.0, 80.0, 0.30, 0.0))).use {
-            Thread.sleep(3000)
+            Thread.sleep(6000)          // a cold emulator camera needs a while for its first frame
             shoot("02_main_calib")
         }
     }
