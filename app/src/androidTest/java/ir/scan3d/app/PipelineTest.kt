@@ -45,15 +45,17 @@ class PipelineTest {
     }
     private fun dir(lx: Double, ly: Double, lz: Double): Vec3 { val o = local(0.0, 0.0, 0.0); val p = local(lx, ly, lz); return p - o }
 
+    // the printed face of a paper sticker sits about 0.1 mm above the surface it is glued to (the fit assumes exactly that)
+    private val thick = 0.10
     private val stickers: List<Stk> by lazy {
         val w = truth[RayFit.W]; val l = truth[RayFit.L]; val h = truth[RayFit.H]
         listOf(
-            Stk(80, local(-13.0, 4.0, h), dir(1.0, 0.0, 0.0), dir(0.0, 1.0, 0.0), dir(0.0, 0.0, 1.0)),
-            Stk(81, local(12.0, -7.0, h), dir(1.0, 0.0, 0.0), dir(0.0, 1.0, 0.0), dir(0.0, 0.0, 1.0)),
-            Stk(82, local(-8.0, l / 2, 12.0), dir(1.0, 0.0, 0.0), dir(0.0, 0.0, 1.0), dir(0.0, 1.0, 0.0)),
-            Stk(83, local(9.0, -l / 2, 12.0), dir(1.0, 0.0, 0.0), dir(0.0, 0.0, 1.0), dir(0.0, -1.0, 0.0)),
-            Stk(84, local(w / 2, 3.0, 12.0), dir(0.0, 1.0, 0.0), dir(0.0, 0.0, 1.0), dir(1.0, 0.0, 0.0)),
-            Stk(85, local(-w / 2, -2.0, 12.0), dir(0.0, 1.0, 0.0), dir(0.0, 0.0, 1.0), dir(-1.0, 0.0, 0.0)))
+            Stk(80, local(-13.0, 4.0, h + thick), dir(1.0, 0.0, 0.0), dir(0.0, 1.0, 0.0), dir(0.0, 0.0, 1.0)),
+            Stk(81, local(12.0, -7.0, h + thick), dir(1.0, 0.0, 0.0), dir(0.0, 1.0, 0.0), dir(0.0, 0.0, 1.0)),
+            Stk(82, local(-8.0, l / 2 + thick, 12.0), dir(1.0, 0.0, 0.0), dir(0.0, 0.0, 1.0), dir(0.0, 1.0, 0.0)),
+            Stk(83, local(9.0, -l / 2 - thick, 12.0), dir(1.0, 0.0, 0.0), dir(0.0, 0.0, 1.0), dir(0.0, -1.0, 0.0)),
+            Stk(84, local(w / 2 + thick, 3.0, 12.0), dir(0.0, 1.0, 0.0), dir(0.0, 0.0, 1.0), dir(1.0, 0.0, 0.0)),
+            Stk(85, local(-w / 2 - thick, -2.0, 12.0), dir(0.0, 1.0, 0.0), dir(0.0, 0.0, 1.0), dir(-1.0, 0.0, 0.0)))
     }
 
     /** Camera at azimuth / elevation / distance around the middle of the sheet (board frame: z into the sheet). */
@@ -200,10 +202,10 @@ class PipelineTest {
             p[RayFit.W], p[RayFit.L], p[RayFit.H], p[RayFit.RC], p[RayFit.RZ], p[RayFit.RB], fit.tiltDeg,
             truth[RayFit.W], truth[RayFit.L], truth[RayFit.H], truth[RayFit.RC], truth[RayFit.RZ], truth[RayFit.RB],
             100 * fit.within, fit.medianMm, fit.edges, fit.sigma?.get(RayFit.W) ?: -1.0, fit.sigma?.get(RayFit.L) ?: -1.0, fit.sigma?.get(RayFit.H) ?: -1.0))
-        // one pixel of these quarter-size photos is 0.46 mm on the object
-        assertTrue("W ${p[RayFit.W]}", abs(p[RayFit.W] - truth[RayFit.W]) < 0.4)
-        assertTrue("L ${p[RayFit.L]}", abs(p[RayFit.L] - truth[RayFit.L]) < 0.4)
-        assertTrue("H ${p[RayFit.H]}", abs(p[RayFit.H] - truth[RayFit.H]) < 0.4)
+        // one pixel of these quarter-size photos is 0.46 mm on the object: half a pixel is the limit asked for here
+        assertTrue("W ${p[RayFit.W]}", abs(p[RayFit.W] - truth[RayFit.W]) < 0.25)
+        assertTrue("L ${p[RayFit.L]}", abs(p[RayFit.L] - truth[RayFit.L]) < 0.25)
+        assertTrue("H ${p[RayFit.H]}", abs(p[RayFit.H] - truth[RayFit.H]) < 0.25)
         assertTrue("tilt ${fit.tiltDeg}", fit.tiltDeg < 1.5)
         assertNotNull(out.clean)
         dir.deleteRecursively()
