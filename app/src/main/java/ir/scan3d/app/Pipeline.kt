@@ -49,6 +49,8 @@ object Pipeline {
 
     /** Below this fraction of confirmed contour edges within RayFit.TOL_MM of the model, the object is not a rounded box. */
     const val FIT_MIN = 0.40
+    /** Systematic error of the edge model (1 sigma, analysis pixels) that the spread between photos cannot see. */
+    const val EDGE_MODEL_PX = 0.2
 
     private const val SIL_MAX = 1200          // silhouettes (masks) are computed on a downscaled copy
     private const val ANALYSIS_MAX = 2400     // contour edges are measured on this larger copy (phone pixels are noisy at 1:1)
@@ -236,7 +238,15 @@ object Pipeline {
                     if (r.within >= FIT_MIN && r.edges >= 150 && r.views >= 4) {
                         clean = RayFit.mesh(p).translated(dx, dy, 0f)
                         // sigma in canonical order: W/L may have been swapped
-                        val sg = r.sigma?.let { s -> if (r.p[RayFit.L] > r.p[RayFit.W]) s.copyOf().also { c -> c[RayFit.W] = s[RayFit.L]; c[RayFit.L] = s[RayFit.W] } else s }
+                        val swapped = r.sigma?.let { s -> if (r.p[RayFit.L] > r.p[RayFit.W]) s.copyOf().also { c -> c[RayFit.W] = s[RayFit.L]; c[RayFit.L] = s[RayFit.W] } else s.copyOf() }
+                        // The spread between photos says how repeatable the result is, not how right: on a clean scan it
+                        // drops to a few microns while the edge model itself is good to about a fifth of a pixel (measured
+                        // against ground truth in the end-to-end test). Both go into the uncertainty that is reported.
+                        val objC = Vec3(r.p[RayFit.CX], r.p[RayFit.CY], -(zs + r.p[RayFit.H] / 2))
+                        val pxMm = outs.indices.mapNotNull { k -> val cam = camAs[k] ?: return@mapNotNull null; val pose = outs[k]?.pose ?: return@mapNotNull null
+                            (pose.centre() - objC).norm() / cam.f }.sorted().let { if (it.isEmpty()) 0.0 else it[it.size / 2] }
+                        val sg = swapped?.also { c -> for (i in intArrayOf(RayFit.W, RayFit.L, RayFit.H, RayFit.RC, RayFit.RZ, RayFit.RB)) c[i] = hypot(c[i], EDGE_MODEL_PX * pxMm) }
+                        log("  one pixel of the analysis image is %.3f mm on the object; reported uncertainty = repeatability and %.1f px of edge-model error".format(pxMm, EDGE_MODEL_PX))
                         fitOut = Fit(p, sg, tilt, r.within, r.medianAbs, r.rays, r.edges, r.views, good.size)
                         if (tilt > 2.0) warnings.add("object tilted %.1f deg on the sheet: it is not lying flat, so its height is uncertain by about %.1f mm".format(
                             tilt, 0.5 * max(p[RayFit.W], p[RayFit.L]) * Math.sin(Math.toRadians(tilt))))

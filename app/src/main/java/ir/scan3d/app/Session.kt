@@ -149,7 +149,7 @@ class Session(ctx: Context, val sid: String, var name: String, var mode: String,
 
     fun sessionDoc(): JSONObject = JSONObject()
         .put("name", name).put("mode", mode).put("savePhotos", true).put("created", created)
-        .put("ua", "scan3d-android/0.1 " + android.os.Build.MODEL)
+        .put("ua", "scan3d-android/0.3 " + android.os.Build.MODEL)
         .put("board", JSONObject().put("squares", JSONArray(listOf(7, 10))).put("square_m", Detector.SQUARE_M)
             .put("marker_m", Detector.MARKER_M).put("dict", "DICT_5X5_100"))
         .put("targets", JSONObject().put("dict", "DICT_4X4_250").put("marker_mm", Detector.TARGET_MM))

@@ -10,8 +10,8 @@ android {
         applicationId = "ir.scan3d.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2"
+        versionCode = 3
+        versionName = "0.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Real phones only (drops ~95 MB of x86 OpenCV libs). CI passes -Pscan3d.allAbis=true for the emulator.
         if (project.findProperty("scan3d.allAbis") != "true") ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
