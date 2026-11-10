@@ -1,0 +1,55 @@
+e2e: rendered 14 photos in 15155 ms; board corners per photo [43, 44, 45, 43, 43, 45, 48, 48, 48, 48, 48, 47, 50, 50], stickers [3, 4, 2, 3, 4, 2, 3, 3, 4, 3, 3, 3, 2, 2]
+e2e: framework 14 frames, 6 stickers (seen in >= 2 frames; all detected ids: [80, 81, 82, 83, 84, 85])
+e2e: BA round 1: sigma0 0.147 px, rejected 0+0
+e2e: sheet bend: 0.03 mm peak-to-valley (coefficients 0.03 0.01 0.02 mm, sigma 0.06 0.03 0.02)
+e2e: sticker 80: 13 views, height above board 26.1 mm, sigma 0.03 mm
+e2e: sticker 81: 13 views, height above board 26.1 mm, sigma 0.03 mm
+e2e: sticker 82: 4 views, height above board 12.0 mm, sigma 0.05 mm
+e2e: sticker 83: 3 views, height above board 12.0 mm, sigma 0.07 mm
+e2e: sticker 84: 4 views, height above board 12.0 mm, sigma 0.05 mm
+e2e: sticker 85: 4 views, height above board 12.0 mm, sigma 0.05 mm
+e2e: [time] solve: 664 ms
+e2e: shot 1: board verified 58.8%, object/unknown area 5.6% of image, stickers inside 3/3
+e2e: shot 2: board verified 69.1%, object/unknown area 4.0% of image, stickers inside 4/4
+e2e: shot 3: board verified 73.2%, object/unknown area 3.2% of image, stickers inside 2/2
+e2e: shot 4: board verified 73.5%, object/unknown area 3.7% of image, stickers inside 3/3
+e2e: shot 5: board verified 69.3%, object/unknown area 4.2% of image, stickers inside 4/4
+e2e: shot 6: board verified 56.3%, object/unknown area 5.4% of image, stickers inside 2/2
+e2e: shot 7: board verified 74.5%, object/unknown area 5.3% of image, stickers inside 3/3
+e2e: shot 8: board verified 77.3%, object/unknown area 4.6% of image, stickers inside 3/3
+e2e: shot 9: board verified 79.7%, object/unknown area 4.2% of image, stickers inside 4/4
+e2e: shot 10: board verified 79.6%, object/unknown area 4.4% of image, stickers inside 3/3
+e2e: shot 11: board verified 72.2%, object/unknown area 5.6% of image, stickers inside 3/3
+e2e: shot 12: board verified 70.8%, object/unknown area 6.2% of image, stickers inside 3/3
+e2e: shot 13: board verified 76.9%, object/unknown area 5.6% of image, stickers inside 2/2
+e2e: shot 14: board verified 79.5%, object/unknown area 5.0% of image, stickers inside 2/2
+e2e: [time] silhouettes (1 threads): 6222 ms
+e2e: stickers z-up range 12.0 .. 26.1 mm; carve tolerance 1 of 14 views
+e2e: object bounds x 52..128 y 88..154 z 0..29 mm
+e2e: removed base skirt: 17 thin columns (< 4.5 mm)
+e2e: [time] carving (1 threads, voxel 0.50 mm): 2552 ms
+e2e: removed 16 triangles of loose pieces
+e2e: [time] mesh (96878 triangles): 237 ms
+e2e: shot 1: outline 110 points, 64 of them measured edges
+e2e: shot 2: outline 82 points, 52 of them measured edges
+e2e: shot 3: outline 83 points, 65 of them measured edges
+e2e: shot 4: outline 104 points, 64 of them measured edges
+e2e: shot 5: outline 79 points, 52 of them measured edges
+e2e: shot 6: outline 65 points, 51 of them measured edges
+e2e: shot 7: outline 106 points, 88 of them measured edges
+e2e: shot 8: outline 107 points, 79 of them measured edges
+e2e: shot 9: outline 95 points, 70 of them measured edges
+e2e: shot 10: outline 113 points, 78 of them measured edges
+e2e: shot 11: outline 111 points, 67 of them measured edges
+e2e: shot 12: outline 107 points, 71 of them measured edges
+e2e: shot 13: outline 122 points, 87 of them measured edges
+e2e: shot 14: outline 114 points, 87 of them measured edges
+e2e: [time] contour edges: 936 ms
+e2e: ray fit: 1398 rays (975 confirmed edges) from 14 views; 95% of the edges within 0.5 mm, median |r| 0.046 mm
+e2e: clean model: 59.96 x 43.91 x 25.93 mm, corner R 8.9, top edge R 3.8, bottom edge R 2.0, yaw 20.0 deg, tilt 0.0 deg against the sheet under it (0.0 against the board axis)
+e2e:   repeatability (leave one photo out): W 0.00  L 0.00  H 0.00  corner R 0.01 mm
+e2e:   sticker centres vs surface (mm): +0.05 +0.02 +0.02 +0.01 -0.02 -0.00
+e2e:   one pixel of the analysis image is 0.454 mm on the object; reported uncertainty = repeatability and 0.2 px of edge-model error
+e2e: [time] clean model fit: 1023 ms
+e2e: pipeline took 11635 ms; hull 70.69 x 60.93 x 26.19 mm, sigma0 0.147 px, sheet bend 0.03 mm, f 721.1 (truth 721.0)
+e2e: RESULT fit 59.965 x 43.912 x 25.934 rc 8.88 rz 3.79 rb 2.02 tilt 0.03 deg | truth 60.0 x 44.0 x 26.0 rc 9.0 rz 4.0 rb 2.0 | within 95%, median 0.046 mm, edges 975, sigma W 0.091 L 0.091 H 0.091

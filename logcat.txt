@@ -1,0 +1,120 @@
+11-10 11:03:30.371  6378  6378 I OpenCV/StaticHelper: -----------------------------------------------------------------
+11-10 11:03:30.876  6378  6378 I Scan3D  : sensor 1280x960 focal [5.0] -> fpx 2000.0
+11-10 11:03:37.377  6378  6398 I TestRunner: finished: mainShots(ir.scan3d.app.ScreenshotTest)
+11-10 11:03:37.384  6378  6398 I TestRunner: started: resultRawAndFailed(ir.scan3d.app.ScreenshotTest)
+11-10 11:03:44.861  6378  6398 I TestRunner: finished: resultRawAndFailed(ir.scan3d.app.ScreenshotTest)
+11-10 11:03:44.884  6378  6398 I TestRunner: started: mainScan(ir.scan3d.app.ScreenshotTest)
+11-10 11:03:45.228  6378  6378 D OpenCV/StaticHelper: First attempt to load libs
+11-10 11:03:45.228  6378  6378 D OpenCV/StaticHelper: Trying to load library opencv_java4
+11-10 11:03:45.228  6378  6378 D OpenCV/StaticHelper: Library opencv_java4 loaded
+11-10 11:03:45.228  6378  6378 D OpenCV/StaticHelper: First attempt to load libs is OK
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper: 
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper: General configuration for OpenCV 4.10.0 =====================================
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:   Version control:               4.10.0-dirty
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper: 
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:   Platform:
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:     Timestamp:                   2024-06-02T16:48:57Z
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:     Host:                        Linux 5.4.0-169-generic x86_64
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:     Target:                      Android 1 x86_64
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:     CMake:                       3.22.1-g37088a8
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:     CMake generator:             Ninja
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:     CMake build tool:            /opt/android-sdk/cmake/3.22.1/bin/ninja
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:     Configuration:               Release
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper: 
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:   CPU/HW features:
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:     Baseline:                    SSE SSE2 SSE3
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:       requested:                 SSE3
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:     Dispatched code generation:  SSE4_1 SSE4_2 FP16 AVX AVX2 AVX512_SKX
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:       requested:                 SSE4_1 SSE4_2 AVX FP16 AVX2 AVX512_SKX
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:       SSE4_1 (16 files):         + SSSE3 SSE4_1
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:       SSE4_2 (1 files):          + SSSE3 SSE4_1 POPCNT SSE4_2
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:       FP16 (0 files):            + SSSE3 SSE4_1 POPCNT SSE4_2 FP16 AVX
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:       AVX (8 files):             + SSSE3 SSE4_1 POPCNT SSE4_2 AVX
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:       AVX2 (36 files):           + SSSE3 SSE4_1 POPCNT SSE4_2 FP16 FMA3 AVX AVX2
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:       AVX512_SKX (5 files):      + SSSE3 SSE4_1 POPCNT SSE4_2 FP16 FMA3 AVX AVX2 AVX_512F AVX512_COMMON AVX512_SKX
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper: 
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:   C/C++:
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:     Built as dynamic libs?:      NO
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:     C++ standard:                11
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:     C++ Compiler:                /opt/android-sdk/ndk/25.2.9519653/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++  (ver 14.0.7)
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:     C++ flags (Release):         -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security     -fsigned-char -W -Wall -Wreturn-type -Wnon-virtual-dtor -Waddress -Wsequence-point -Wformat -Wformat-security -Wmissing-declarations -Wmissing-prototypes -Wstrict-prototypes -Wundef -Winit-self -Wpointer-arith -Wshadow -Wsign-promo -Wuninitialized -Winconsistent-missing-override -Wno-delete-non-virtual-dtor -Wno-unnamed-type-template-args -Wno-comment -Wno-deprecated-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion -fdiagnostics-show-option -Wno-long-long -Qunused-arguments  -msse -msse2 -msse3 -fvisibility=hidden -fvisibility-inlines-hidden  -O3 -DNDEBUG   -DNDEBUG
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:     C++ flags (Debug):           -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security     -fsigned-char -W -Wall -Wreturn-type -Wnon-virtual-dtor -Waddress -Wsequence-point -Wformat -Wformat-security -Wmissing-declarations -Wmissing-prototypes -Wstrict-prototypes -Wundef -Winit-self -Wpointer-arith -Wshadow -Wsign-promo -Wuninitialized -Winconsistent-missing-override -Wno-delete-non-virtual-dtor -Wno-unnamed-type-template-args -Wno-comment -Wno-deprecated-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion -fdiagnostics-show-option -Wno-long-long -Qunused-arguments  -msse -msse2 -msse3 -fvisibility=hidden -fvisibility-inlines-hidden  -fno-limit-debug-info   -O0 -DDEBUG -D_DEBUG -g
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:     C Compiler:                  /opt/android-sdk/ndk/25.2.9519653/toolchains/llvm/prebuilt/linux-x86_64/bin/clang
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:     C flags (Release):           -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security    -fsigned-char -W -Wall -Wreturn-type -Wnon-virtual-dtor -Waddress -Wsequence-point -Wformat -Wformat-security -Wmissing-declarations -Wmissing-prototypes -Wstrict-prototypes -Wundef -Winit-self -Wpointer-arith -Wshadow -Wsign-promo -Wuninitialized -Winconsistent-missing-override -Wno-delete-non-virtual-dtor -Wno-unnamed-type-template-args -Wno-comment -Wno-deprecated-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion -fdiagnostics-show-option -Wno-long-long -Qunused-arguments  -msse -msse2 -msse3 -fvisibility=hidden -fvisibility-inlines-hidden  -O3 -DNDEBUG   -DNDEBUG
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:     C flags (Debug):             -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security    -fsigned-char -W -Wall -Wreturn-type -Wnon-virtual-dtor -Waddress -Wsequence-point -Wformat -Wformat-security -Wmissing-declarations -Wmissing-prototypes -Wstrict-prototypes -Wundef -Winit-self -Wpointer-arith -Wshadow -Wsign-promo -Wuninitialized -Winconsistent-missing-override -Wno-delete-non-virtual-dtor -Wno-unnamed-type-template-args -Wno-comment -Wno-deprecated-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion -fdiagnostics-show-option -Wno-long-long -Qunused-arguments  -msse -msse2 -msse3 -fvisibility=hidden -fvisibility-inlines-hidden  -fno-limit-debug-info   -O0 -DDEBUG -D_DEBUG -g
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:     Linker flags (Release):      -Wl,--exclude-libs,libippicv.a -Wl,--exclude-libs,libippiw.a -Wl,--build-id=sha1 -Wl,--no-rosegment -Wl,--fatal-warnings -Wl,--no-undefined -Qunused-arguments   -Wl,--as-needed -Wl,--no-undefined -Wl,--gc-sections  
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:     Linker flags (Debug):        -Wl,--exclude-libs,libippicv.a -Wl,--exclude-libs,libippiw.a -Wl,--build-id=sha1 -Wl,--no-rosegment -Wl,--fatal-warnings -Wl,--no-undefined -Qunused-arguments   -Wl,--as-needed -Wl,--no-undefined  
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:     ccache:                      YES
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:     Precompiled headers:         NO
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:     Extra dependencies:          z dl m log
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:     3rdparty dependencies:       libcpufeatures libprotobuf ade tbb ittnotify libjpeg-turbo libwebp libpng libtiff libopenjp2 IlmImf ippiw ippicv
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper: 
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:   OpenCV modules:
+11-10 11:03:45.228  6378  6378 I OpenCV/StaticHelper:     To be built:                 calib3d core dnn features2d flann gapi highgui imgcodecs imgproc java ml objdetect photo stitching video videoio
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     Disabled:                    world
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     Disabled by dependency:      -
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     Unavailable:                 python2 python3 ts
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     Applications:                -
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     Documentation:               NO
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     Non-free algorithms:         NO
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper: 
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:   Android NDK:                   /opt/android-sdk/ndk/25.2.9519653 (ver 25.2.9519653)
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     Android ABI:                 x86_64
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     NDK toolchain:               x86_64-linux-android-clang
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     STL type:                    c++_shared
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     Native API level:            21
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:   Android SDK:                   /opt/android-sdk (tools:  build tools: 30.0.3)
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper: 
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:   GUI:                           NONE
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper: 
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:   Media I/O: 
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     ZLib:                        z (ver 1.2.12)
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     JPEG:                        build-libjpeg-turbo (ver 3.0.3-70)
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:       SIMD Support Request:      YES
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:       SIMD Support:              YES
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     WEBP:                        build (ver encoder: 0x020f)
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     PNG:                         build (ver 1.6.43)
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:       SIMD Support Request:      YES
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:       SIMD Support:              YES (Intel SSE)
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     TIFF:                        build (ver 42 - 4.6.0)
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     JPEG 2000:                   build (ver 2.5.0)
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     OpenEXR:                     build (ver 2.3.0)
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     HDR:                         YES
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     SUNRASTER:                   YES
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     PXM:                         YES
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     PFM:                         YES
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper: 
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:   Video I/O:
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:    MEDIANDK:                     YES
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:    NDK Camera:                   NO
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper: 
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:   Parallel framework:            TBB (ver 2021.11 interface 12110)
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper: 
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:   Trace:                         YES (with Intel ITT)
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper: 
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:   Other third-party libraries:
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     Intel IPP:                   2021.11.0 [2021.11.0]
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:            at:                   /home/ci/build/o4a/3rdparty/ippicv/ippicv_lnx/icv
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     Intel IPP IW:                sources (2021.11.0)
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:               at:                /home/ci/build/o4a/3rdparty/ippicv/ippicv_lnx/iw
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     Custom HAL:                  NO
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     Protobuf:                    build (3.19.1)
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     Flatbuffers:                 builtin/3rdparty (23.5.9)
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper: 
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:   Python (for build):            /usr/bin/python3
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper: 
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:   Java:                          export all functions
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     ant:                         NO
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     Java wrappers:               YES ()
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:     Java tests:                  NO
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper: 
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper:   Install to:                    /home/ci/build/o4a/install
+11-10 11:03:45.229  6378  6378 I OpenCV/StaticHelper: -----------------------------------------------------------------
+11-10 11:03:45.334  6378  6378 I Scan3D  : sensor 1280x960 focal [5.0] -> fpx 2000.0
+11-10 11:03:54.533  6378  6398 I TestRunner: finished: mainScan(ir.scan3d.app.ScreenshotTest)
+11-10 11:03:54.535  6378  6398 I TestRunner: started: tutorial(ir.scan3d.app.ScreenshotTest)
+11-10 11:04:04.355  6378  6398 I TestRunner: finished: tutorial(ir.scan3d.app.ScreenshotTest)
+11-10 11:04:04.358  6378  6398 I TestRunner: started: sessions(ir.scan3d.app.ScreenshotTest)
+11-10 11:04:07.030  6378  6398 I TestRunner: finished: sessions(ir.scan3d.app.ScreenshotTest)
+11-10 11:04:07.031  6378  6398 I TestRunner: run finished: 9 tests, 0 failed, 0 ignored
+11-10 11:04:07.071  6365  6365 I AndroidRuntime: VM exiting with result code 0.
