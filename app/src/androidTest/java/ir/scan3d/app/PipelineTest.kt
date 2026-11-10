@@ -72,20 +72,31 @@ class PipelineTest {
         return Pose6(Rot.toVec(rot), t)
     }
 
-    /** Distance along a ray (z-up frame, unit direction) to the box, or -1. */
+    /**
+     * Distance along a ray (z-up frame, unit direction) to the box, or -1. Exact at grazing rays: the distance to a
+     * convex body is convex along a line, so its minimum is found by golden section and the ray hits exactly when
+     * that minimum is negative. (Plain sphere tracing gives up on rays that only just cut the body, which renders the
+     * box a few hundredths of a millimetre too small: a bias of the test, not of the pipeline.)
+     */
     private fun hit(ox: Double, oy: Double, oz: Double, ux: Double, uy: Double, uz: Double): Double {
         val tc = (model.mx - ox) * ux + (model.my - oy) * uy + (model.mz - oz) * uz
         val qx = ox + tc * ux - model.mx; val qy = oy + tc * uy - model.my; val qz = oz + tc * uz - model.mz
         val rad = model.radius; val d2 = rad * rad - (qx * qx + qy * qy + qz * qz)
         if (d2 <= 0) return -1.0
-        val half = sqrt(d2); var t = max(0.0, tc - half); val end = tc + half
-        var k = 0
-        while (t < end && k++ < 96) {
-            val s = model.sdf(ox + t * ux, oy + t * uy, oz + t * uz)
-            if (s < 2e-3) return t
-            t += s
+        val half = sqrt(d2); val enter = max(0.0, tc - half)
+        var a = enter; var b = tc + half
+        val gr = 0.6180339887498949
+        var c = b - gr * (b - a); var d = a + gr * (b - a)
+        var fc = model.sdf(ox + c * ux, oy + c * uy, oz + c * uz); var fd = model.sdf(ox + d * ux, oy + d * uy, oz + d * uz)
+        for (k in 0 until 34) {
+            if (fc < fd) { b = d; d = c; fd = fc; c = b - gr * (b - a); fc = model.sdf(ox + c * ux, oy + c * uy, oz + c * uz) }
+            else { a = c; c = d; fc = fd; d = a + gr * (b - a); fd = model.sdf(ox + d * ux, oy + d * uy, oz + d * uz) }
         }
-        return -1.0
+        val tm = (a + b) / 2
+        if (model.sdf(ox + tm * ux, oy + tm * uy, oz + tm * uz) >= 0.0) return -1.0
+        var lo = enter; var hi = tm                          // first crossing: between entering the bounding sphere and the minimum
+        for (k in 0 until 34) { val mid = (lo + hi) / 2; if (model.sdf(ox + mid * ux, oy + mid * uy, oz + mid * uz) > 0) lo = mid else hi = mid }
+        return hi
     }
 
     /** Gray value seen along a ray. */

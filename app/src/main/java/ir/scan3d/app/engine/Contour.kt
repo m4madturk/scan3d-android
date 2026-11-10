@@ -17,6 +17,12 @@ import kotlin.math.sqrt
  * at least as strong accounts for a step in the photo. Without the sign, the marker pattern (an edge every few
  * pixels) explained away most of an object's outline.
  *
+ * Where the step is, exactly: the steepest point of the profile is NOT the edge when the two sides have different
+ * slopes. A rounded plastic edge under a ceiling light has a brightness ramp on the object side, and that moves
+ * the steepest point by (difference of slopes) x blur^2 / (step height): a third of a pixel outwards against a
+ * white square, a sixth inwards against a black one. So the profile around the steepest point is fitted with what
+ * it is, a step between two ramps seen through a Gaussian blur, and the step's position is taken from the fit.
+ *
  * Points whose edge is confirmed this way are measurements; the others (white object on a white square, a
  * boundary that is only "unknown") are just bounds: the object lies inside them.
  */
@@ -27,6 +33,7 @@ object Contour {
     private const val STEP = 0.25            // profile sampling (analysis px)
     private const val SEARCH_SIL = 4.0       // search this far to both sides of the mask boundary (silhouette px)
     private const val BLUR_SIGMA = 0.8       // smoothing of the profile (analysis px)
+    private const val FIT_HALF = 3.5         // the edge model is fitted over this many px to either side of the steepest point
 
     /**
      * @param mask   silhouette (object component only) at sw x sh
@@ -41,11 +48,13 @@ object Contour {
         val out = ArrayList<Point>()
         val ratio = iw.toDouble() / sw
         val proj = SheetProjector(cam, pose, warp)
-        val half = (SEARCH_SIL * ratio / STEP).roundToInt()
+        val search = (SEARCH_SIL * ratio / STEP).roundToInt()               // the edge is looked for within +- this many samples
+        val half = search + ((FIT_HALF + 0.5) / STEP).roundToInt()          // the profile reaches further, for the model fit
         val n = 2 * half + 1
         val prof = FloatArray(n); val pred = FloatArray(n); val tmp = FloatArray(n)
         val dg = FloatArray(n); val dp = FloatArray(n)
         val hit = DoubleArray(2)
+        val fit = EdgeFit()
         // Gaussian kernel for the 1-D smoothing of the profiles
         val ks = BLUR_SIGMA / STEP; val kr = (2.5 * ks).roundToInt()
         val kern = FloatArray(2 * kr + 1) { exp(-0.5 * ((it - kr) / ks) * ((it - kr) / ks)).toFloat() }
@@ -76,9 +85,10 @@ object Contour {
                 val s = (k - half) * STEP
                 val pu = cu + s * nx; val pv = cv + s * ny
                 prof[k] = (bilinear(img, iw, pu, pv) + bilinear(img, iw, pu - 0.75 * ny, pv + 0.75 * nx) + bilinear(img, iw, pu + 0.75 * ny, pv - 0.75 * nx)) / 3f
-                if (!proj.hit(pu, pv, hit)) { okPred = false; break }
-                val t = tpl.sample(hit[0], hit[1]); if (t < 0f) { okPred = false; break }
-                pred[k] = lo + (hi - lo) * t / 255f
+                val t = if (proj.hit(pu, pv, hit)) tpl.sample(hit[0], hit[1]) else -1f
+                if (t >= 0f) pred[k] = lo + (hi - lo) * t / 255f
+                else if (abs(k - half) <= search) { okPred = false; break }      // no print to compare with where the edge is looked for
+                else pred[k] = prof[k]                                              // beyond the search range: only needed for smoothing
             }
             if (!okPred) { out.add(fallback); continue }
             smooth(prof, tmp, kern, kr); smooth(pred, tmp, kern, kr)
@@ -86,7 +96,7 @@ object Contour {
             dg[0] = dg[1]; dg[n - 1] = dg[n - 2]; dp[0] = dp[1]; dp[n - 1] = dp[n - 2]
             // strongest step that the print does not explain, preferring positions close to the mask boundary
             var best = -1; var bestScore = 0.0
-            for (k in 2 until n - 2) {
+            for (k in half - search..half + search) {
                 val g = dg[k]; val ag = abs(g)
                 var un = ag                                           // the part of the photo's step that the print does not explain
                 for (q in max(0, k - expl)..minOf(n - 1, k + expl)) {
@@ -115,37 +125,71 @@ object Contour {
             val a = abs(dg[best - 1]); val b = abs(dg[best]); val d = abs(dg[best + 1])
             val den = a - 2 * b + d
             if (b >= a && b >= d && abs(den) > 1e-6f) s += STEP * 0.5 * (a - d) / den          // parabola through the gradient peak
-            s -= shadingShift(prof, dg, dp, best, n)
+            // the step between two ramps, fitted: its position, not the steepest point (see the class comment)
+            val sFit = fit.position(prof, n, half, s)
+            if (!sFit.isNaN()) s = sFit
             out.add(Point(cu + s * nx, cv + s * ny, true))
         }
         return out
     }
 
     /**
-     * How far the steepest point of the profile lies from the real edge because the two sides have different slopes.
-     *
-     * A step of height A between two ramps (slopes m_in, m_out), blurred with a Gaussian of width sigma, is steepest
-     * at (m_out - m_in) sigma^2 / A from the step, not at it. A rounded plastic edge under a ceiling light has such
-     * a ramp on the object side, and the shift is a quarter of a pixel: outwards against a white square, inwards
-     * against a black one. All three quantities are in the profile itself: the slopes 2 px to either side of the
-     * peak, the step from the levels there, the blur from the peak gradient of the step, A / (sigma sqrt(2 pi)).
-     * Positive result = the peak lies outside (towards larger profile index). 0 when the model does not apply.
+     * Least-squares fit of a blurred step between two ramps to a profile:
+     *   f(x) = l0 + ml x + A Phi(x / sigma) + dm (x Phi(x / sigma) + sigma phi(x / sigma)),   x = s - s0
+     * (the convolution of [l0 + ml x for x < 0, l0 + A + (ml + dm) x for x > 0] with a Gaussian of width sigma).
+     * Unknowns: l0, ml, A, dm, s0, sigma. Gauss-Newton from the steepest point. Reusable buffers, not thread-safe.
      */
-    private fun shadingShift(prof: FloatArray, dg: FloatArray, dp: FloatArray, peak: Int, n: Int): Double {
-        val off = (2.0 / STEP).roundToInt(); val win = (0.75 / STEP).roundToInt()
-        val ki = peak - off; val ko = peak + off
-        if (ki - win < 1 || ko + win > n - 2) return 0.0
-        var mIn = 0.0; var mOut = 0.0; var printEdge = 0f
-        for (q in -win..win) { mIn += dg[ki + q]; mOut += dg[ko + q]; if (abs(dp[ko + q]) > printEdge) printEdge = abs(dp[ko + q]) }
-        mIn /= (2 * win + 1); mOut /= (2 * win + 1)
-        val l0 = prof[ki] + mIn * off * STEP; val r0 = prof[ko] - mOut * off * STEP
-        val step = r0 - l0
-        if (abs(step) < 8.0 || printEdge > 0.25 * abs(step)) return 0.0          // weak step, or the print has an edge of its own right there
-        val gNet = dg[peak] - (mIn + mOut) / 2
-        if (gNet * step <= 0) return 0.0
-        val sigma = step / (gNet * 2.5066282746)
-        if (sigma < 0.4 || sigma > 3.0) return 0.0
-        return ((mOut - mIn) * sigma * sigma / step).coerceIn(-0.4, 0.4)
+    class EdgeFit {
+        private val th = DoubleArray(6); private val g = DoubleArray(6); private val jac = DoubleArray(6)
+        private val hm = Array(6) { DoubleArray(6) }
+
+        /**
+         * Edge position (same coordinate as sPeak: px along the profile, 0 at index `half`), or NaN when the profile
+         * around the steepest point is not a step between two ramps (another edge nearby, texture, too little contrast).
+         */
+        fun position(prof: FloatArray, n: Int, half: Int, sPeak: Double): Double {
+            val k0 = ((sPeak - FIT_HALF) / STEP).roundToInt() + half; val k1 = ((sPeak + FIT_HALF) / STEP).roundToInt() + half
+            if (k0 < 0 || k1 >= n) return Double.NaN
+            val q = (1.0 / STEP).roundToInt()
+            val y0 = prof[k0].toDouble(); val y1 = prof[k1].toDouble()
+            val ml = (prof[k0 + q] - y0) / (q * STEP); val mr = (y1 - prof[k1 - q]) / (q * STEP)
+            val lAt = y0 + ml * (sPeak - (k0 - half) * STEP); val rAt = y1 - mr * ((k1 - half) * STEP - sPeak)
+            th[0] = lAt; th[1] = ml; th[2] = rAt - lAt; th[3] = mr - ml; th[4] = sPeak; th[5] = 1.0
+            for (iter in 0 until 8) {
+                for (a in 0 until 6) { g[a] = 0.0; java.util.Arrays.fill(hm[a], 0.0) }
+                for (k in k0..k1) {
+                    val x = (k - half) * STEP - th[4]; val z = x / th[5]; val cP = cdf(z); val dP = pdf(z)
+                    val r = prof[k] - (th[0] + th[1] * x + th[2] * cP + th[3] * (x * cP + th[5] * dP))
+                    jac[0] = 1.0; jac[1] = x; jac[2] = cP; jac[3] = x * cP + th[5] * dP
+                    jac[4] = -(th[1] + th[2] * dP / th[5] + th[3] * cP)
+                    jac[5] = -th[2] * x * dP / (th[5] * th[5]) + th[3] * dP
+                    for (a in 0 until 6) { g[a] += jac[a] * r; for (b in a until 6) hm[a][b] += jac[a] * jac[b] }
+                }
+                for (a in 0 until 6) { for (b in 0 until a) hm[a][b] = hm[b][a]; hm[a][a] += 1e-3 * hm[a][a] + 1e-9 }
+                val d = Linear.solve(hm, g) ?: return Double.NaN
+                val ds = d[4].coerceIn(-0.3, 0.3)
+                for (a in 0 until 6) th[a] += if (a == 4) ds else if (a == 5) d[5].coerceIn(-0.3, 0.3) else d[a]
+                th[5] = th[5].coerceIn(0.35, 3.0)
+                if (abs(ds) < 1e-4) break
+            }
+            var ss = 0.0
+            for (k in k0..k1) {
+                val x = (k - half) * STEP - th[4]; val z = x / th[5]; val cP = cdf(z)
+                val r = prof[k] - (th[0] + th[1] * x + th[2] * cP + th[3] * (x * cP + th[5] * pdf(z)))
+                ss += r * r
+            }
+            val rms = sqrt(ss / (k1 - k0 + 1))
+            if (th[4].isNaN() || abs(th[4] - sPeak) > 0.6 || abs(th[2]) < 8.0 || rms > 0.06 * abs(th[2]) + 1.0) return Double.NaN
+            return th[4]
+        }
+
+        private fun pdf(z: Double) = exp(-0.5 * z * z) / 2.5066282746310002
+        private fun cdf(z: Double): Double {            // Abramowitz & Stegun 7.1.26, |error| < 1.5e-7
+            val x = abs(z) / 1.4142135623730951
+            val t = 1.0 / (1.0 + 0.3275911 * x)
+            val e = 1.0 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * exp(-x * x)
+            return if (z >= 0) 0.5 * (1 + e) else 0.5 * (1 - e)
+        }
     }
 
     private fun smooth(a: FloatArray, tmp: FloatArray, kern: FloatArray, kr: Int) {
