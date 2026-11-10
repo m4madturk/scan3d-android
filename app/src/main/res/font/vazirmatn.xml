@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Vazirmatn (SIL Open Font License 1.1, see assets/licenses): a Persian UI typeface, bundled so the app looks the same on every phone -->
+<font-family xmlns:app="http://schemas.android.com/apk/res-auto">
+    <font app:fontStyle="normal" app:fontWeight="400" app:font="@font/vazirmatn_regular" />
+    <font app:fontStyle="normal" app:fontWeight="500" app:font="@font/vazirmatn_medium" />
+    <font app:fontStyle="normal" app:fontWeight="700" app:font="@font/vazirmatn_bold" />
+</font-family>

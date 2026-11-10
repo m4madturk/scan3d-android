@@ -278,8 +278,10 @@ class EngineTest {
             for (it in 0 until 40) { val mid = (lo + hi) / 2; if (model.sdf(model.mx + mid * dx, model.my + mid * dy, model.mz + mid * dz) <= 0) lo = mid else hi = mid }
             surf.add(Vec3(model.mx + lo * dx, model.my + lo * dy, model.mz + lo * dz))
         }
-        var zmin = Double.MAX_VALUE; for (q in surf) zmin = minOf(zmin, q.z)
-        assertEquals("the tilted body must rest on the sheet", 0.0, zmin, 0.05)
+        // resting: the sheet plane z = 0 touches the tilted body and does not cut it
+        var touch = Double.MAX_VALUE
+        var gx = 40.0; while (gx <= 135.0) { var gy = 80.0; while (gy <= 170.0) { touch = minOf(touch, model.sdf(gx, gy, 0.0)); gy += 0.25 }; gx += 0.25 }
+        assertEquals("the tilted body must rest on the sheet", 0.0, touch, 0.02)
         val cam = Camera(2885.0, 2040.0, 1530.0, 0.05, -0.10)
         val rnd = java.util.Random(5)
         val rays = RayFit.Rays()

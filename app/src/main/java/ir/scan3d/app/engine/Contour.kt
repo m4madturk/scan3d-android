@@ -90,6 +90,16 @@ object Contour {
                 if (score > bestScore) { bestScore = score; best = k }
             }
             if (best < 0 || bestScore < 0.03 * (hi - lo)) { out.add(fallback); continue }
+            // the score is prior-weighted, which pulls its maximum towards the mask boundary (a third of a pixel in
+            // tests): climb to the true peak of the gradient itself before interpolating
+            var climb = 0
+            while (climb < 8) {
+                val here = abs(dg[best])
+                if (best + 1 < n - 2 && abs(dg[best + 1]) > here) best++
+                else if (best - 1 > 1 && abs(dg[best - 1]) > here) best--
+                else break
+                climb++
+            }
             var s = (best - half) * STEP
             val a = abs(dg[best - 1]); val b = abs(dg[best]); val d = abs(dg[best + 1])
             val den = a - 2 * b + d
