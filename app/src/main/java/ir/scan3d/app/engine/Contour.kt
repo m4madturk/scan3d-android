@@ -64,7 +64,9 @@ object Contour {
             val cu = (xs + 0.5) * ratio - 0.5; val cv = (ys + 0.5) * ratio - 0.5
             val reach = half * STEP + 2
             if (cu < reach || cv < reach || cu > iw - 2 - reach || cv > ih - 2 - reach) continue
-            val fallback = Point(cu + 0.5 * ratio * nx, cv + 0.5 * ratio * ny, false)   // pixel centre -> pixel border
+            // not measured: only a bound. One full pixel out from the last pixel inside, so that the bound never lies
+            // inside the outline it came from (half a pixel out, half of them did, and pulled the model inwards)
+            val fallback = Point(cu + 1.0 * ratio * nx, cv + 1.0 * ratio * ny, false)
             if (levels == null) { out.add(fallback); continue }
             val c = levels.cell(xs, ys); val lo = levels.lo[c].toFloat(); val hi = levels.hi[c].toFloat()
             if (hi - lo < 30f) { out.add(fallback); continue }
@@ -113,9 +115,37 @@ object Contour {
             val a = abs(dg[best - 1]); val b = abs(dg[best]); val d = abs(dg[best + 1])
             val den = a - 2 * b + d
             if (b >= a && b >= d && abs(den) > 1e-6f) s += STEP * 0.5 * (a - d) / den          // parabola through the gradient peak
+            s -= shadingShift(prof, dg, dp, best, n)
             out.add(Point(cu + s * nx, cv + s * ny, true))
         }
         return out
+    }
+
+    /**
+     * How far the steepest point of the profile lies from the real edge because the two sides have different slopes.
+     *
+     * A step of height A between two ramps (slopes m_in, m_out), blurred with a Gaussian of width sigma, is steepest
+     * at (m_out - m_in) sigma^2 / A from the step, not at it. A rounded plastic edge under a ceiling light has such
+     * a ramp on the object side, and the shift is a quarter of a pixel: outwards against a white square, inwards
+     * against a black one. All three quantities are in the profile itself: the slopes 2 px to either side of the
+     * peak, the step from the levels there, the blur from the peak gradient of the step, A / (sigma sqrt(2 pi)).
+     * Positive result = the peak lies outside (towards larger profile index). 0 when the model does not apply.
+     */
+    private fun shadingShift(prof: FloatArray, dg: FloatArray, dp: FloatArray, peak: Int, n: Int): Double {
+        val off = (2.0 / STEP).roundToInt(); val win = (0.75 / STEP).roundToInt()
+        val ki = peak - off; val ko = peak + off
+        if (ki - win < 1 || ko + win > n - 2) return 0.0
+        var mIn = 0.0; var mOut = 0.0; var printEdge = 0f
+        for (q in -win..win) { mIn += dg[ki + q]; mOut += dg[ko + q]; if (abs(dp[ko + q]) > printEdge) printEdge = abs(dp[ko + q]) }
+        mIn /= (2 * win + 1); mOut /= (2 * win + 1)
+        val l0 = prof[ki] + mIn * off * STEP; val r0 = prof[ko] - mOut * off * STEP
+        val step = r0 - l0
+        if (abs(step) < 8.0 || printEdge > 0.25 * abs(step)) return 0.0          // weak step, or the print has an edge of its own right there
+        val gNet = dg[peak] - (mIn + mOut) / 2
+        if (gNet * step <= 0) return 0.0
+        val sigma = step / (gNet * 2.5066282746)
+        if (sigma < 0.4 || sigma > 3.0) return 0.0
+        return ((mOut - mIn) * sigma * sigma / step).coerceIn(-0.4, 0.4)
     }
 
     private fun smooth(a: FloatArray, tmp: FloatArray, kern: FloatArray, kr: Int) {
