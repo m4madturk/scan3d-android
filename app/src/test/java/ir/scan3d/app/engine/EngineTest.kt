@@ -501,4 +501,53 @@ class EngineTest {
         println("stl: sphere corner normals within %.2f deg of radial".format(Math.toDegrees(Math.acos(worst.coerceIn(-1.0, 1.0)))))
         assertTrue("sphere normals must be smooth (worst cos $worst)", worst > Math.cos(Math.toRadians(3.0)))
     }
+
+    /** Rotation matrix -> vector -> matrix must be the identity at every angle, half turns included. */
+    @Test
+    fun rotationVectorSurvivesHalfTurns() {
+        val rnd = java.util.Random(5)
+        var worst = 0.0
+        for (trial in 0 until 4000) {
+            var ax = rnd.nextGaussian(); var ay = rnd.nextGaussian(); var az = rnd.nextGaussian()
+            val n = sqrt(ax * ax + ay * ay + az * az); ax /= n; ay /= n; az /= n
+            val th = when (trial % 4) { 0 -> Math.PI; 1 -> Math.PI - Math.pow(10.0, -1 - 8 * rnd.nextDouble()); 2 -> Math.pow(10.0, -1 - 12 * rnd.nextDouble()); else -> Math.PI * rnd.nextDouble() }
+            val r = Rot.fromVec(doubleArrayOf(ax * th, ay * th, az * th)); val r2 = Rot.fromVec(Rot.toVec(r))
+            for (i in 0 until 3) for (j in 0 until 3) worst = maxOf(worst, abs(r[i][j] - r2[i][j]))
+        }
+        println("rotation: worst round-trip error %.2e".format(worst))
+        assertTrue("worst round-trip error $worst", worst < 1e-9)
+    }
+
+    /** The rasterised outline of a mesh must be the outline: no pinholes inside, nothing outside. */
+    @Test
+    fun rasterMatchesTheOutlineOfASphere() {
+        val rad = 12.0; val c = Vec3(87.5, 125.0, 12.0)                     // z-up: a ball lying on the sheet
+        val nA = 64; val nE = 31
+        val sv = ArrayList<Float>(); val st = ArrayList<Int>()
+        for (r in 0 until nE) { val el = Math.toRadians(-90.0 + 180.0 * (r + 1) / (nE + 1))
+            for (a in 0 until nA) { val az = 2 * Math.PI * a / nA
+                sv.add((c.x + rad * Math.cos(el) * Math.cos(az)).toFloat()); sv.add((c.y + rad * Math.cos(el) * Math.sin(az)).toFloat()); sv.add((c.z + rad * Math.sin(el)).toFloat()) } }
+        val top = sv.size / 3; sv.add(c.x.toFloat()); sv.add(c.y.toFloat()); sv.add((c.z + rad).toFloat())
+        val bot = sv.size / 3; sv.add(c.x.toFloat()); sv.add(c.y.toFloat()); sv.add((c.z - rad).toFloat())
+        for (r in 0 until nE - 1) for (a in 0 until nA) { val b = (a + 1) % nA
+            st.add(r * nA + a); st.add(r * nA + b); st.add((r + 1) * nA + a); st.add(r * nA + b); st.add((r + 1) * nA + b); st.add((r + 1) * nA + a) }
+        for (a in 0 until nA) { val b = (a + 1) % nA; st.add((nE - 1) * nA + a); st.add((nE - 1) * nA + b); st.add(top); st.add(b); st.add(a); st.add(bot) }
+        val cam = Camera(800.0, 320.3, 239.6, 0.05, -0.02); val pose = lookAt(35.0, 40.0, 300.0)
+        val w = 640; val h = 480
+        val m = Raster.silhouette(Mesh(sv.toFloatArray(), st.toIntArray()), cam, pose, w, h)
+        val rot = pose.R(); val cc = pose.centre()
+        val oc = Vec3(c.x, c.y, -c.z) - cc                                  // ball centre from the camera, board frame
+        var inside = 0; var missing = 0; var extra = 0
+        for (v in 0 until h) for (u in 0 until w) {
+            val nrm = cam.undistort(u.toDouble(), v.toDouble())
+            val d = Vec3(rot[0][0] * nrm[0] + rot[1][0] * nrm[1] + rot[2][0], rot[0][1] * nrm[0] + rot[1][1] * nrm[1] + rot[2][1], rot[0][2] * nrm[0] + rot[1][2] * nrm[1] + rot[2][2]).unit()
+            val miss = (oc - d * oc.dot(d)).norm()                          // how far the pixel's ray passes from the ball's centre
+            val set = m[v * w + u]
+            if (miss < rad - 0.25) { inside++; if (!set) missing++ }
+            if (miss > rad + 0.15 && set) extra++
+        }
+        println("raster: $inside pixels inside the ball, $missing missing, $extra outside it")
+        assertTrue("the ball must be in view ($inside px)", inside > 2500)
+        assertEquals(0, missing); assertEquals(0, extra)
+    }
 }

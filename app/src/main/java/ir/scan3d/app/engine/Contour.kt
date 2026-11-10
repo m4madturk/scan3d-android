@@ -13,6 +13,9 @@ import kotlin.math.sqrt
  * camera actually recorded is in the photo: next to every boundary pixel of the mask, the intensity profile
  * across the boundary is searched for a step that the printed board does NOT explain (the board is rendered
  * through the solved camera, so its own edges are known), and that step is located to a fraction of a pixel.
+ * "Explained" is signed: only a board edge of the SAME sense (dark to light or light to dark) within 1.5 px and
+ * at least as strong accounts for a step in the photo. Without the sign, the marker pattern (an edge every few
+ * pixels) explained away most of an object's outline.
  *
  * Points whose edge is confirmed this way are measurements; the others (white object on a white square, a
  * boundary that is only "unknown") are just bounds: the object lies inside them.
@@ -77,16 +80,22 @@ object Contour {
             }
             if (!okPred) { out.add(fallback); continue }
             smooth(prof, tmp, kern, kr); smooth(pred, tmp, kern, kr)
-            for (k in 1 until n - 1) { dg[k] = (prof[k + 1] - prof[k - 1]) / (2 * STEP).toFloat(); dp[k] = abs(pred[k + 1] - pred[k - 1]) / (2 * STEP).toFloat() }
+            for (k in 1 until n - 1) { dg[k] = (prof[k + 1] - prof[k - 1]) / (2 * STEP).toFloat(); dp[k] = (pred[k + 1] - pred[k - 1]) / (2 * STEP).toFloat() }
             dg[0] = dg[1]; dg[n - 1] = dg[n - 2]; dp[0] = dp[1]; dp[n - 1] = dp[n - 2]
             // strongest step that the print does not explain, preferring positions close to the mask boundary
             var best = -1; var bestScore = 0.0
             for (k in 2 until n - 2) {
-                var e = 0f
-                for (q in max(0, k - expl)..minOf(n - 1, k + expl)) if (dp[q] > e) e = dp[q]
+                val g = dg[k]; val ag = abs(g)
+                var un = ag                                           // the part of the photo's step that the print does not explain
+                for (q in max(0, k - expl)..minOf(n - 1, k + expl)) {
+                    val p = dp[q]
+                    if (g * p <= 0f) continue                         // a board edge of the opposite sense explains nothing
+                    val u = ag - 1.3f * abs(p)                        // same sense: explained up to 1.3 x its strength (shadows weaken, never strengthen)
+                    if (u < un) un = u
+                }
                 val s = (k - half) * STEP
                 val z = (s - 0.5 * ratio) / (2.5 * ratio)
-                val score = (abs(dg[k]) - 1.2f * e) * exp(-0.5 * z * z)
+                val score = un * exp(-0.5 * z * z)
                 if (score > bestScore) { bestScore = score; best = k }
             }
             if (best < 0 || bestScore < 0.03 * (hi - lo)) { out.add(fallback); continue }

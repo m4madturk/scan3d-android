@@ -3,6 +3,7 @@ package ir.scan3d.app.engine
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.max
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -36,13 +37,28 @@ object Rot {
             doubleArrayOf(c * a * v - b * si, c * b * v + a * si, co + c * c * v))
     }
 
-    /** matrix -> rotation vector (inverse Rodrigues). */
+    /**
+     * matrix -> rotation vector (inverse Rodrigues), valid for every angle. The antisymmetric part of R gives the
+     * axis times 2 sin(angle); it vanishes at 180 degrees (a camera that sees the sheet exactly upside down), where
+     * the axis is taken from the symmetric part instead. The previous version returned a zero vector there.
+     */
     fun toVec(R: Array<DoubleArray>): DoubleArray {
-        val tr = ((R[0][0] + R[1][1] + R[2][2] - 1) / 2).coerceIn(-1.0, 1.0)
-        val th = Math.acos(tr)
-        if (th < 1e-9) return doubleArrayOf(0.0, 0.0, 0.0)
-        val s = if (abs(sin(th)) > 1e-9) th / (2 * sin(th)) else 0.5
-        return doubleArrayOf((R[2][1] - R[1][2]) * s, (R[0][2] - R[2][0]) * s, (R[1][0] - R[0][1]) * s)
+        val ax = R[2][1] - R[1][2]; val ay = R[0][2] - R[2][0]; val az = R[1][0] - R[0][1]
+        val s2 = sqrt(ax * ax + ay * ay + az * az)                                   // 2 sin(angle)
+        val c = ((R[0][0] + R[1][1] + R[2][2] - 1) / 2).coerceIn(-1.0, 1.0)          // cos(angle)
+        val th = Math.atan2(s2 / 2, c)
+        if (th < 1e-12) return doubleArrayOf(0.0, 0.0, 0.0)
+        if (s2 > 1e-4) return doubleArrayOf(ax * th / s2, ay * th / s2, az * th / s2)
+        if (c > 0) return doubleArrayOf(ax / 2, ay / 2, az / 2)                       // tiny angle: sin(angle) = angle
+        // angle = pi (to 1e-4): R + R^T = 2 a a^T - 2 cos(angle) I ... solve for the axis from the largest diagonal term
+        val xx = (R[0][0] - c) / (1 - c); val yy = (R[1][1] - c) / (1 - c); val zz = (R[2][2] - c) / (1 - c)
+        val a = DoubleArray(3)
+        if (xx >= yy && xx >= zz) { a[0] = sqrt(max(xx, 0.0)); a[1] = (R[0][1] + R[1][0]) / (2 * (1 - c) * a[0]); a[2] = (R[0][2] + R[2][0]) / (2 * (1 - c) * a[0]) }
+        else if (yy >= zz) { a[1] = sqrt(max(yy, 0.0)); a[0] = (R[0][1] + R[1][0]) / (2 * (1 - c) * a[1]); a[2] = (R[1][2] + R[2][1]) / (2 * (1 - c) * a[1]) }
+        else { a[2] = sqrt(max(zz, 0.0)); a[0] = (R[0][2] + R[2][0]) / (2 * (1 - c) * a[2]); a[1] = (R[1][2] + R[2][1]) / (2 * (1 - c) * a[2]) }
+        val n = sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2])
+        val sign = if (a[0] * ax + a[1] * ay + a[2] * az < 0) -1.0 else 1.0           // the sense, as far as the antisymmetric part still tells
+        return doubleArrayOf(sign * a[0] / n * th, sign * a[1] / n * th, sign * a[2] / n * th)
     }
 
     fun apply(R: Array<DoubleArray>, p: Vec3) = Vec3(

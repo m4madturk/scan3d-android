@@ -11,6 +11,7 @@ import ir.scan3d.app.engine.MarchingCubes
 import ir.scan3d.app.engine.Mesh
 import ir.scan3d.app.engine.Parallel
 import ir.scan3d.app.engine.PlaneCut
+import ir.scan3d.app.engine.Raster
 import ir.scan3d.app.engine.Pose6
 import ir.scan3d.app.engine.RayFit
 import ir.scan3d.app.engine.SheetWarp
@@ -78,8 +79,11 @@ object Pipeline {
     /** Camera of an image that is the full frame resampled to `scale` of its size (pixel centres handled). */
     private fun scaled(c: Camera, scale: Double) = Camera(c.f * scale, (c.cx + 0.5) * scale - 0.5, (c.cy + 0.5) * scale - 0.5, c.k1, c.k2)
 
-    /** What one photo contributes: its silhouette for carving and its measured contour points for the model fit. */
-    private class ViewOut(val sil: SilView?, val contour: List<Contour.Point>, val camA: Camera?, val pose: Pose6?, val note: String, val ai: Int)
+    /**
+     * What one photo contributes to the hull: its silhouette, plus what the later edge search needs from the same
+     * analysis (which pixels look at the print, and the local black / white levels of the print in this photo).
+     */
+    private class ViewOut(val sil: SilView?, val valid: BooleanArray?, val levels: Silhouette.Levels?, val pose: Pose6?, val note: String, val ai: Int)
 
     /**
      * Build the model. shots must all share one sensor size. Returns the mesh in mm (centred on xy, resting on
@@ -114,7 +118,7 @@ object Pipeline {
         val objStickers = geo.stickers.filter { it.id !in onBoard }
         val objCentres = objStickers.map { it.centre }
 
-        // ---- per photo: silhouette (for the hull) and sub-pixel contour edges (for the clean model), in parallel ----
+        // ---- per photo: silhouette (for the hull), in parallel ----
         val sc = min(1.0, SIL_MAX / max(w, h).toDouble())
         val sw = (w * sc).toInt(); val sh = (h * sc).toInt()
         val camS = scaled(geo.camera, sw.toDouble() / w)
@@ -126,17 +130,17 @@ object Pipeline {
         Parallel.forEach(use.size, workers) { k ->
             val ui = use[k]; val shot = shots[ui]
             val pose = geo.poses[k]
-            outs[k] = if (pose == null) ViewOut(null, emptyList(), null, null, "shot ${shot.n}: no pose", 0)
+            outs[k] = if (pose == null) ViewOut(null, null, null, null, "shot ${shot.n}: no pose", 0)
                       else processView(shot, files[ui], w, h, sw, sh, camS, geo.camera, pose, warp, tpl, objCentres, objStickers.map { it.id to it.centre }, segmenter)
             val n = finished.incrementAndGet()
-            synchronized(finished) { progress("دورخط و لبه‌یابی عکس $n از ${use.size}…", 0.08 + 0.42 * n / use.size) }
+            synchronized(finished) { progress("دورخط عکس $n از ${use.size}…", 0.08 + 0.40 * n / use.size) }
         }
         val views = ArrayList<SilView>(); var aiOk = 0; var aiFallback = 0; var dropped = 0
         for (o in outs) { o ?: continue; log(o.note); if (o.ai > 0) aiOk++ else if (o.ai < 0) aiFallback++; if (o.sil != null) views.add(o.sil) else dropped++ }
         if (segmenter != null) log("AI segmentation: $aiOk views refined, $aiFallback fell back to the structure test")
         if (dropped > 0) log("$dropped photo(s) gave no usable silhouette")
         require(views.size >= 2) { "fewer than 2 usable silhouettes" }
-        stage("silhouettes + contours (${workers} threads)")
+        stage("silhouettes (${workers} threads)")
 
         // ---- visual hull (the raw scan) ----
         val planes = objStickers.filter { it.views >= min(3, views.size) }.map {
@@ -180,6 +184,28 @@ object Pipeline {
         val size = DoubleArray(3) { bb[1][it] - bb[0][it] }
         stage("mesh (${mesh.triangleCount} triangles)")
 
+        // ---- the object's photographed edge in every photo, searched next to the outline of the HULL ----
+        // (one photo's own mask also holds what that photo could not judge; the hull is what all photos agree on)
+        progress("لبه‌یابی روی عکس‌ها…", 0.84)
+        val contours = arrayOfNulls<List<Contour.Point>>(use.size); val camAs = arrayOfNulls<Camera>(use.size)
+        val notes = arrayOfNulls<String>(use.size)
+        Parallel.forEach(use.size, workers) { k ->
+            val o = outs[k] ?: return@forEach
+            val pose = o.pose ?: return@forEach; val valid = o.valid ?: return@forEach
+            if (o.sil == null) return@forEach
+            val shot = shots[use[k]]
+            val obj = Raster.silhouette(mesh, camS, pose, sw, sh)
+            var area = 0; for (on in obj) if (on) area++
+            if (area < 200) { notes[k] = "shot ${shot.n}: the hull is not in view"; return@forEach }
+            val im = loadImages(files[use[k]], w, h, sw, sh, shot.fileRot, false) ?: return@forEach
+            val ca = scaled(geo.camera, im.aw.toDouble() / w)
+            val pts = Contour.extract(obj, SilView(sw, sh, obj, camS, pose).sdf, valid, sw, sh, o.levels, im.ana, im.aw, im.ah, ca, pose, warp, tpl)
+            contours[k] = pts; camAs[k] = ca
+            notes[k] = "shot ${shot.n}: outline ${pts.size} points, ${pts.count { it.edge }} of them measured edges"
+        }
+        notes.forEach { if (it != null) log(it) }
+        stage("contour edges")
+
         // ---- clean parametric model, fitted to the measured contour edges ----
         progress("برازش مدل تمیز روی لبه‌های عکس…", 0.88)
         val warnings = ArrayList(geo.warnings)
@@ -190,9 +216,9 @@ object Pipeline {
             else {
                 val zs = warp.height(p0[RayFit.CX], p0[RayFit.CY])
                 val rays = RayFit.Rays(4096)
-                for ((k, o) in outs.withIndex()) { o ?: continue; val cam = o.camA ?: continue; val pose = o.pose ?: continue
+                for ((k, o) in outs.withIndex()) { o ?: continue; val cam = camAs[k] ?: continue; val pose = o.pose ?: continue; val pts = contours[k] ?: continue
                     val R = pose.R(); val c = pose.centre()
-                    for (pt in o.contour) rays.addPixel(cam, R, c, pt.u, pt.v, pt.edge, k, zs) }
+                    for (pt in pts) rays.addPixel(cam, R, c, pt.u, pt.v, pt.edge, k, zs) }
                 val good = objStickers.filter { it.views >= 2 && (it.sigma.maxOrNull() ?: 0.0).let { s -> s.isNaN() || s < 0.5 } }
                 val st = DoubleArray(good.size * 3); good.forEachIndexed { i, s -> st[3 * i] = s.centre.x; st[3 * i + 1] = s.centre.y; st[3 * i + 2] = -s.centre.z }
                 val r = RayFit.fit(p0, rays, st, zs, true, log)
@@ -241,8 +267,8 @@ object Pipeline {
     /** One photo: silhouette (structure test + AI), sanity check against the stickers, contour edges. Thread-safe. */
     private fun processView(shot: Shot, file: File, w: Int, h: Int, sw: Int, sh: Int, camS: Camera, camFull: Camera, pose: Pose6, warp: SheetWarp,
                             tpl: Silhouette.BoardTemplate, objCentres: List<Vec3>, stickers: List<Pair<Int, Vec3>>, segmenter: Segmenter?): ViewOut {
-        val im = loadImages(file, w, h, sw, sh, shot.fileRot) ?: return ViewOut(null, emptyList(), null, null, "shot ${shot.n}: image could not be read", 0)
-        val r = Silhouette.extract(im.sil, sw, sh, camS, pose, tpl, warp = warp) ?: return ViewOut(null, emptyList(), null, null, "shot ${shot.n}: no silhouette (board not visible enough)", 0)
+        val im = loadImages(file, w, h, sw, sh, shot.fileRot) ?: return ViewOut(null, null, null, null, "shot ${shot.n}: image could not be read", 0)
+        val r = Silhouette.extract(im.sil, sw, sh, camS, pose, tpl, warp = warp) ?: return ViewOut(null, null, null, null, "shot ${shot.n}: no silhouette (board not visible enough)", 0)
         val uv = objCentres.mapNotNull { c -> camS.project(pose.toCamera(c)) }
         // AI refinement: segment a crop centred on the projected stickers; accept only if every sticker lands inside
         var aiNote = ""; var ai = 0
@@ -283,29 +309,12 @@ object Pipeline {
         }
         val area = r.area.toDouble() / (sw * sh)
         if (tot >= 3 && inside < 0.6 * tot)
-            return ViewOut(null, emptyList(), null, null, "shot ${shot.n}: silhouette misses the stickers ($inside/$tot inside, area ${pct(area)}); dropped", ai)
+            return ViewOut(null, null, null, null, "shot ${shot.n}: silhouette misses the stickers ($inside/$tot inside, area ${pct(area)}); dropped", ai)
         val view = SilView(sw, sh, r.mask, camS, pose)
-        // contour edges: only on the piece of the mask that holds the stickers (the object), measured on the larger image
-        var contour: List<Contour.Point> = emptyList(); var camA: Camera? = null
-        if (uv.isNotEmpty()) {
-            val labels = Silhouette.components(r.mask, sw, sh)
-            val keep = uv.mapNotNull { p -> val u = p[0].toInt(); val v = p[1].toInt(); if (u in 0 until sw && v in 0 until sh && labels[v * sw + u] != 0) labels[v * sw + u] else null }.toSet()
-            if (keep.isNotEmpty()) {
-                val obj = BooleanArray(sw * sh) { labels[it] in keep }
-                var n = 0; for (v in obj) if (v) n++
-                if (n < 0.35 * sw * sh) {                         // a mask that covers a third of the photo is not an object outline
-                    val objView = SilView(sw, sh, obj, camS, pose)
-                    val ca = scaled(camFull, im.aw.toDouble() / w)
-                    camA = ca
-                    contour = Contour.extract(obj, objView.sdf, r.valid, sw, sh, r.levels, im.ana, im.aw, im.ah, ca, pose, warp, tpl)
-                }
-            }
-        }
-        val edges = contour.count { it.edge }
         // NOTE: never run String.format over text that already contains a formatted "%": "12% of crop" parses as the
         // format specifier "% o" and throws (this crashed every build in which the AI mask was used)
-        val note = "shot ${shot.n}: board verified ${pct(r.solidity)}, object/unknown area ${pct(area)} of image, stickers inside $inside/$tot$aiNote, contour ${contour.size} points ($edges measured edges)"
-        return ViewOut(view, contour, camA, pose, note, ai)
+        val note = "shot ${shot.n}: board verified ${pct(r.solidity)}, object/unknown area ${pct(area)} of image, stickers inside $inside/$tot$aiNote"
+        return ViewOut(view, r.valid, r.levels, pose, note, ai)
     }
 
     private fun pct(x: Double) = "%.1f".format(100 * x) + "%"
@@ -318,7 +327,7 @@ object Pipeline {
      * `rot` into the canonical sensor frame and returns it together with a copy scaled to (sw, sh).
      * (w, h) is the canonical full size, used to detect a stored orientation that disagrees with `rot`.
      */
-    fun loadImages(f: File, w: Int, h: Int, sw: Int, sh: Int, rot: Int = 0): Images? {
+    fun loadImages(f: File, w: Int, h: Int, sw: Int, sh: Int, rot: Int = 0, withSil: Boolean = true): Images? {
         val o = BitmapFactory.Options(); o.inJustDecodeBounds = true; BitmapFactory.decodeFile(f.absolutePath, o)
         if (o.outWidth <= 0) return null
         var r = rot
@@ -331,6 +340,7 @@ object Pipeline {
         val turned = r == 90 || r == 270
         val aw = if (turned) bm.height else bm.width; val ah = if (turned) bm.width else bm.height
         val dw = if (turned) sh else sw; val dh = if (turned) sw else sh                       // size of the stored (unrotated) silhouette image
+        if (!withSil) { bm.recycle(); return Images(ByteArray(0), ana, aw, ah) }
         val small = if (bm.width != dw || bm.height != dh) Bitmap.createScaledBitmap(bm, dw, dh, true) else bm
         val sil = toGray(small, r)
         if (small !== bm) small.recycle(); bm.recycle()

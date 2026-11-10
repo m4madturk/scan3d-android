@@ -35,6 +35,10 @@ object RayFit {
     private const val STICKER_C = 0.6      // robust scale for stickers (one may sit on a feature that is not part of the box)
     private const val UNCONFIRMED = 0.05   // weight of a ray that misses the model when its contour point is only a bound
     private const val RB_PRIOR = 1.0       // weak pull of the bottom radius towards the top radius (it is rarely seen well)
+    // Objects lie flat unless something props them up. Prior on the tilt angles with sigma = 1 degree against an edge
+    // noise of 0.1 mm: (0.1 mm)^2 / (1 deg in rad)^2 = 33. A tilt that the outlines really show costs thousands of
+    // edges a fraction of a millimetre each and wins easily; a tilt that only a lack of low photos permits does not.
+    private const val TILT_PRIOR = 33.0
     private val SCHEDULE = doubleArrayOf(4.0, 2.0, 1.0, 0.5)   // robust scale (mm), coarse to fine
     private val STEPS = doubleArrayOf(0.02, 0.02, Math.toRadians(0.1), 0.02, 0.02, 0.02, 0.02, 0.02, Math.toRadians(0.1), Math.toRadians(0.1), 0.02)
     const val MAX_RAYS = 4000
@@ -200,7 +204,7 @@ object RayFit {
             val u = (rs[k] / cs) * (rs[k] / cs)
             ws[k] = STICKER_W / (1.0 + u); cost += STICKER_W * cs * cs * ln(1.0 + u)
         }
-        val q = m.p; cost += RB_PRIOR * (q[RB] - q[RZ]) * (q[RB] - q[RZ])
+        val q = m.p; cost += RB_PRIOR * (q[RB] - q[RZ]) * (q[RB] - q[RZ]) + TILT_PRIOR * (q[TX] * q[TX] + q[TY] * q[TY])
         return Eval(r, t, w, rs, ws, cost)
     }
 
@@ -238,6 +242,7 @@ object RayFit {
             val dPrior = p[RB] - p[RZ]
             A[RB][RB] += RB_PRIOR; A[RZ][RZ] += RB_PRIOR; A[RB][RZ] -= RB_PRIOR; A[RZ][RB] -= RB_PRIOR
             g[RB] += RB_PRIOR * dPrior; g[RZ] -= RB_PRIOR * dPrior
+            A[TX][TX] += TILT_PRIOR; A[TY][TY] += TILT_PRIOR; g[TX] += TILT_PRIOR * p[TX]; g[TY] += TILT_PRIOR * p[TY]
             var improved = false; var rel = 0.0
             for (attempt in 0 until 8) {
                 val Ad = Array(NP) { a -> DoubleArray(NP) { b -> A[a][b] + (if (a == b) lambda * (A[a][a] + 1e-9) else 0.0) } }
